@@ -1,6 +1,17 @@
-# DraftFi
+<p align="center">
+  <img src="docs/DraftFi_Icon.png" alt="DraftFi" width="140" />
+</p>
 
-**Local-first, BYO-LLM financial "what-if" simulation engine.**
+<h1 align="center">DraftFi</h1>
+
+<p align="center"><strong>Local-first, BYO-LLM financial "what-if" simulation engine.</strong></p>
+
+<p align="center">
+  <a href="https://github.com/arcwel/draftfi/releases/latest"><img src="https://img.shields.io/github/v/release/arcwel/draftfi?sort=semver" alt="Latest release" /></a>
+  <a href="https://github.com/arcwel/draftfi/releases"><img src="https://img.shields.io/github/downloads/arcwel/draftfi/total" alt="Total downloads" /></a>
+  <a href="https://github.com/arcwel/draftfi/actions/workflows/ci.yml"><img src="https://github.com/arcwel/draftfi/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT" />
+</p>
 
 DraftFi is an open-source personal financial forecasting app for forward-looking
 scenario modeling. Unlike commercial tools that require fragile bank-syncing

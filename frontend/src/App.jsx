@@ -4,6 +4,7 @@ import Sidebar from './zones/Sidebar'
 import SimulationStrip from './zones/SimulationStrip'
 import Charts from './zones/Charts'
 import Ledger from './zones/Ledger'
+import iconUrl from './assets/DraftFi_Icon.png'
 
 export default function App() {
   const init = useStore((s) => s.init)
@@ -20,7 +21,12 @@ export default function App() {
     // Natural page scroll on small screens; fixed-viewport dashboard at lg+.
     <div className="flex min-h-screen flex-col bg-ink text-gray-200 lg:h-screen lg:overflow-hidden">
       <header className="flex items-center justify-between border-b border-edge px-4 py-2">
-        <div className="flex items-baseline gap-2">
+        <div className="flex items-center gap-2">
+          <img
+            src={iconUrl}
+            alt="DraftFi logo"
+            className="h-7 w-7 shrink-0"
+          />
           <span className="text-lg font-semibold tracking-tight text-white">
             DraftFi
           </span>
