@@ -10,6 +10,8 @@ on:
 
 jobs:
   build:
+    permissions:
+      contents: write   # allow the release step to create/update the Release
     strategy:
       fail-fast: false
       matrix:
