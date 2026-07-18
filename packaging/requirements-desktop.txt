@@ -1,0 +1,11 @@
+# Extra dependencies for building the packaged desktop app.
+# Installed on top of backend/requirements.txt.
+
+pywebview==5.3.2      # native desktop window (WebKit on macOS, WebView2 on Windows)
+pyinstaller==6.11.1   # freezes Python + deps + frontend into one app
+
+# Platform webview backends (pip resolves the right one per-OS):
+pyobjc-core==11.0; sys_platform == "darwin"
+pyobjc-framework-Cocoa==11.0; sys_platform == "darwin"
+pyobjc-framework-WebKit==11.0; sys_platform == "darwin"
+pythonnet==3.0.5; sys_platform == "win32"

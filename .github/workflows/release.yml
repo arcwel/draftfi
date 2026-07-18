@@ -1,0 +1,61 @@
+name: Build desktop apps
+
+# Builds self-contained macOS and Windows apps. Triggers on a version tag
+# (e.g. v0.1.0) and attaches the packaged apps to a GitHub Release. Can also be
+# run manually from the Actions tab.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            artifact: DraftFi-macos
+          - os: windows-latest
+            artifact: DraftFi-windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install -r packaging/requirements-desktop.txt
+
+      - name: Build desktop app
+        run: python packaging/build.py
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd dist_desktop
+          zip -ry ../${{ matrix.artifact }}.zip DraftFi.app
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path dist_desktop/DraftFi/* -DestinationPath ${{ matrix.artifact }}.zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.zip
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.artifact }}.zip

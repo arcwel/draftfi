@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+sandbox.db
+dev.db
+smoke.db
+*.db-wal
+*.db-shm
+.env
