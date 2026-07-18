@@ -36,12 +36,14 @@ jobs:
       - name: Commit the snapshot
         run: |
           set -euo pipefail
-          if git diff --quiet -- download-stats.csv; then
+          # `git add` first so a brand-new (untracked) CSV is also detected —
+          # `git diff` alone doesn't see untracked files.
+          git add download-stats.csv
+          if git diff --cached --quiet -- download-stats.csv; then
             echo "No release assets yet — nothing to record."
             exit 0
           fi
           git config user.name "Arkwel AI"
           git config user.email "support@arkwel.ai"
-          git add download-stats.csv
           git commit -m "chore: snapshot release download counts [skip ci]"
           git push
