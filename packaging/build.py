@@ -92,11 +92,11 @@ def build_app(dist_dir: Path) -> None:
     finally:
         shutil.rmtree(staged, ignore_errors=True)
 
-    print(f"\n✅ Built {APP_NAME} into {dist_dir}", flush=True)
+    print(f"\n[OK] Built {APP_NAME} into {dist_dir}", flush=True)
     if sys.platform == "darwin":
-        print(f"   → {dist_dir / (APP_NAME + '.app')}")
+        print(f"  -> {dist_dir / (APP_NAME + '.app')}")
     elif sys.platform == "win32":
-        print(f"   → {dist_dir / APP_NAME / (APP_NAME + '.exe')}")
+        print(f"  -> {dist_dir / APP_NAME / (APP_NAME + '.exe')}")
 
 
 def _icon_path() -> Path | None:
@@ -124,4 +124,11 @@ def main() -> None:
 
 if __name__ == "__main__":
     os.environ.setdefault("PYTHONUTF8", "1")
+    # Windows consoles default to cp1252; force UTF-8 so any non-ASCII output
+    # (paths, etc.) can't crash the build with a UnicodeEncodeError.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
     main()
