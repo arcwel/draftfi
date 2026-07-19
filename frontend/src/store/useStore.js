@@ -39,6 +39,8 @@ export const useStore = create((set, get) => ({
   importing: false,
   importSummary: null,
   importProgress: null, // { processed, total } while an import runs
+  // When a CSV can't be auto-mapped: { headers, sample_rows, signature, files }
+  mappingNeeded: null,
   syncing: false,
   syncResult: null, // { recategorized, still_uncategorized, ... } shown briefly
   syncProgress: null, // { processed, total } while a sync runs
@@ -277,20 +279,51 @@ export const useStore = create((set, get) => ({
     await Promise.all([get().loadCategories(), get().loadBudget()])
   },
 
-  // ---- import ---- //
-  async importCsv(file, accountName) {
-    set({ importing: true, importSummary: null, importProgress: { processed: 0, total: 0 } })
+  // ---- import (CSV/OFX/QFX/QIF, one or many files) ---- //
+  async importFiles(files, accountName, mapping = null) {
+    const fileList = Array.from(files)
+    set({
+      importing: true,
+      importSummary: null,
+      importProgress: { processed: 0, total: 0 },
+    })
     try {
-      const { job_id } = await api.importCsv(file, accountName)
+      const { job_id } = await api.importFiles(fileList, accountName, mapping)
       const final = await get()._pollJob(api.importStatus, job_id, (s) =>
         set({ importProgress: { processed: s.processed, total: s.total } }),
       )
-      set({ importSummary: final })
+      if (final && final.state === 'needs_mapping') {
+        // Hold the files so the mapping dialog can re-submit them.
+        set({
+          mappingNeeded: {
+            headers: final.headers,
+            sample_rows: final.sample_rows,
+            signature: final.signature,
+            files: fileList,
+            account: accountName,
+          },
+        })
+        return final
+      }
+      set({ importSummary: final, mappingNeeded: null })
       await Promise.all([get().loadTransactions(), get().pollLlm()])
       await get().recompute()
+      return final
     } finally {
       set({ importing: false, importProgress: null })
     }
+  },
+
+  // Re-run an import that stalled on mapping, now with the user's column map.
+  async submitMapping(mapping) {
+    const pending = get().mappingNeeded
+    if (!pending) return
+    set({ mappingNeeded: null })
+    await get().importFiles(pending.files, pending.account, mapping)
+  },
+
+  cancelMapping() {
+    set({ mappingNeeded: null })
   },
 
   async overrideCategory(txId, categoryId) {
@@ -383,9 +416,10 @@ export const useStore = create((set, get) => ({
     }
   },
 
-  // Poll a background job's status endpoint until it finishes, reporting
-  // progress via onProgress. Returns the final status object.
+  // Poll a background job's status endpoint until it reaches a terminal state,
+  // reporting progress via onProgress. Returns the final status object.
   async _pollJob(statusFn, jobId, onProgress) {
+    const TERMINAL = new Set(['done', 'error', 'needs_mapping'])
     // eslint-disable-next-line no-constant-condition
     while (true) {
       let status
@@ -395,7 +429,7 @@ export const useStore = create((set, get) => ({
         return null
       }
       onProgress(status)
-      if (status.state === 'done' || status.state === 'error') return status
+      if (TERMINAL.has(status.state)) return status
       await new Promise((r) => setTimeout(r, 400))
     }
   },

@@ -64,6 +64,17 @@ class ParsedRow:
 class ParseReport:
     rows: list[ParsedRow] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    # Set when the file had a header but the needed columns couldn't be found —
+    # the signal for the frontend's manual column-mapping dialog.
+    mapping_failed: bool = False
+    headers: list[str] = field(default_factory=list)
+    sample_rows: list[list[str]] = field(default_factory=list)
+
+
+def header_signature(headers: list[str]) -> str:
+    """Stable key for a bank's header layout (mapping-memory lookups)."""
+    normalized = "|".join((h or "").strip().lower() for h in headers)
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
 
 
 def _normalize_amount(value: str) -> float | None:
@@ -114,8 +125,16 @@ def _decode(content: bytes) -> str:
     return content.decode("utf-8", errors="replace")
 
 
-def parse_csv(content: bytes, default_account: str = "Imported Account") -> ParseReport:
-    """Parse raw CSV bytes into normalized rows with per-row error reporting."""
+def parse_csv(
+    content: bytes,
+    default_account: str = "Imported Account",
+    mapping: dict[str, str] | None = None,
+) -> ParseReport:
+    """Parse raw CSV bytes into normalized rows with per-row error reporting.
+
+    ``mapping`` (canonical field → actual header name) overrides auto-detection
+    — used by the manual column-mapping dialog and by remembered layouts.
+    """
     report = ParseReport()
     text = _decode(content)
 
@@ -130,20 +149,47 @@ def parse_csv(content: bytes, default_account: str = "Imported Account") -> Pars
         return report
 
     header = [h for h in reader.fieldnames if h is not None]
-    date_col = _match(header, DATE_KEYS)
-    desc_col = _match(header, DESC_KEYS)
-    amount_col = _match(header, AMOUNT_KEYS)
-    debit_col = _match(header, DEBIT_KEYS)
-    credit_col = _match(header, CREDIT_KEYS)
-    account_col = _match(header, ACCOUNT_KEYS)
+    report.headers = header
+    # First few raw rows for the mapping dialog's preview.
+    raw_reader = csv.reader(io.StringIO(text), dialect=dialect)
+    next(raw_reader, None)  # skip header
+    for raw_row in raw_reader:
+        report.sample_rows.append([str(v) for v in raw_row])
+        if len(report.sample_rows) >= 3:
+            break
+
+    if mapping:
+        def pick(key: str) -> str | None:
+            col = (mapping.get(key) or "").strip()
+            return col if col in header else None
+
+        date_col = pick("date")
+        desc_col = pick("description")
+        amount_col = pick("amount")
+        debit_col = pick("debit")
+        credit_col = pick("credit")
+        account_col = pick("account")
+    else:
+        date_col = _match(header, DATE_KEYS)
+        desc_col = _match(header, DESC_KEYS)
+        amount_col = _match(header, AMOUNT_KEYS)
+        debit_col = _match(header, DEBIT_KEYS)
+        credit_col = _match(header, CREDIT_KEYS)
+        account_col = _match(header, ACCOUNT_KEYS)
 
     if desc_col is None:
+        report.mapping_failed = True
         report.errors.append(
             f"Could not find a description column. Headers seen: {header}"
         )
         return report
     if amount_col is None and debit_col is None and credit_col is None:
+        report.mapping_failed = True
         report.errors.append("Could not find an amount (or debit/credit) column.")
+        return report
+    if date_col is None:
+        report.mapping_failed = True
+        report.errors.append("Could not find a date column.")
         return report
 
     for line_no, row in enumerate(reader, start=2):

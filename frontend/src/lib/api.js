@@ -120,13 +120,14 @@ export const api = {
     return request('/export/restore', { method: 'POST', body: form })
   },
 
-  importCsv: (file, accountName) => {
+  // Import one or more statement files (CSV/OFX/QFX/QIF). `mapping` supplies a
+  // manual CSV column mapping when auto-detection failed.
+  importFiles: (files, accountName, mapping) => {
     const form = new FormData()
-    form.append('file', file)
-    // A STABLE account label keeps re-imports idempotent. We deliberately do
-    // NOT use the filename (which changes between downloads). The CSV's own
-    // account column, when present, still takes precedence on the backend.
+    for (const f of files) form.append('files', f)
+    // A STABLE account label keeps re-imports idempotent (never the filename).
     form.append('account_name', (accountName || '').trim() || 'Imported Account')
+    if (mapping) form.append('mapping', JSON.stringify(mapping))
     return request('/import/csv', { method: 'POST', body: form })
   },
 

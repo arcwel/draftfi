@@ -1,10 +1,13 @@
 import { useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
+import MappingModal from './MappingModal'
 
-// CSV drag-and-drop with an inline processing indicator. Imports are additive:
-// rows already in the database are left untouched, only new rows are added.
+const ALLOWED = ['.csv', '.ofx', '.qfx', '.qif']
+
+// Drag-and-drop import (CSV/OFX/QFX/QIF, one or many files) with a live
+// progress indicator. Imports are additive — existing rows are untouched.
 export default function Dropzone() {
-  const importCsv = useStore((s) => s.importCsv)
+  const importFiles = useStore((s) => s.importFiles)
   const importing = useStore((s) => s.importing)
   const summary = useStore((s) => s.importSummary)
   const resetAll = useStore((s) => s.resetAll)
@@ -28,16 +31,20 @@ export default function Dropzone() {
     }
   }
 
-  async function handleFile(file) {
-    if (!file) return
+  async function handleFiles(fileList) {
+    const files = Array.from(fileList || [])
+    if (!files.length) return
     setError(null)
-    if (!file.name.toLowerCase().endsWith('.csv')) {
-      setError('Please drop a .csv bank statement.')
+    const bad = files.find(
+      (f) => !ALLOWED.some((ext) => f.name.toLowerCase().endsWith(ext)),
+    )
+    if (bad) {
+      setError(`Unsupported file "${bad.name}". Use CSV, OFX, QFX, or QIF.`)
       return
     }
     try {
       // Pass a stable account label (never the filename) so re-imports dedupe.
-      await importCsv(file, account)
+      await importFiles(files, account)
     } catch (e) {
       setError(e.message)
     }
@@ -58,7 +65,7 @@ export default function Dropzone() {
         onDrop={(e) => {
           e.preventDefault()
           setDragging(false)
-          handleFile(e.dataTransfer.files?.[0])
+          handleFiles(e.dataTransfer.files)
         }}
         className={`rounded-lg border-2 border-dashed p-4 text-center cursor-pointer transition
           ${dragging ? 'border-sky-400 bg-sky-950/40' : 'border-edge bg-panel hover:border-gray-500'}`}
@@ -84,17 +91,20 @@ export default function Dropzone() {
           <div className="text-xs text-gray-400">
             <div className="text-2xl leading-none">⤓</div>
             <div className="mt-1 font-medium text-gray-200">
-              Drop bank CSV here
+              Drop statements here
             </div>
-            <div className="text-[11px] text-gray-500">or click to browse</div>
+            <div className="text-[11px] text-gray-500">
+              CSV · OFX · QFX · QIF — one or many
+            </div>
           </div>
         )}
         <input
           ref={inputRef}
           type="file"
-          accept=".csv"
+          multiple
+          accept=".csv,.ofx,.qfx,.qif"
           className="hidden"
-          onChange={(e) => handleFile(e.target.files?.[0])}
+          onChange={(e) => handleFiles(e.target.files)}
         />
       </div>
 
@@ -133,6 +143,8 @@ export default function Dropzone() {
           )}
         </div>
       )}
+
+      <MappingModal />
     </div>
   )
 }

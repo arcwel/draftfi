@@ -16,7 +16,7 @@ def _run_import(client, content, filename="chase_checking.csv", account="Chase")
     """Start an import and poll the background job to completion."""
     r = client.post(
         "/import/csv",
-        files={"file": (filename, content, "text/csv")},
+        files={"files": (filename, content, "text/csv")},
         data={"account_name": account},
     )
     assert r.status_code == 200

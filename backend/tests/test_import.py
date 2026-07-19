@@ -55,7 +55,7 @@ def _import(client, content, filename="statement.csv", account=""):
     """Kick off an import and poll its background job to completion."""
     r = client.post(
         "/import/csv",
-        files={"file": (filename, content, "text/csv")},
+        files={"files": (filename, content, "text/csv")},
         data={"account_name": account},
     )
     job_id = r.json()["job_id"]

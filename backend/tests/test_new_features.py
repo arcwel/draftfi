@@ -202,7 +202,7 @@ def test_import_uses_one_batch_call_per_chunk(client, monkeypatch):
     )
     csv_bytes = ("Date,Description,Amount\n" + rows).encode()
     r = client.post(
-        "/import/csv", files={"file": ("big.csv", csv_bytes, "text/csv")}
+        "/import/csv", files={"files": ("big.csv", csv_bytes, "text/csv")}
     )
     job_id = r.json()["job_id"]
     for _ in range(300):
