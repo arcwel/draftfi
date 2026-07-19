@@ -8,6 +8,7 @@ Guarantees:
 from __future__ import annotations
 
 import importlib
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -51,11 +52,19 @@ def client(tmp_path, monkeypatch):
 
 
 def _import(client, content, filename="statement.csv", account=""):
-    return client.post(
+    """Kick off an import and poll its background job to completion."""
+    r = client.post(
         "/import/csv",
         files={"file": (filename, content, "text/csv")},
         data={"account_name": account},
-    ).json()
+    )
+    job_id = r.json()["job_id"]
+    for _ in range(200):
+        status = client.get(f"/import/status/{job_id}").json()
+        if status["state"] in ("done", "error"):
+            return status
+        time.sleep(0.02)
+    raise AssertionError("import did not finish in time")
 
 
 def test_reimport_same_data_is_noop(client):

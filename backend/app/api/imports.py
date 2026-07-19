@@ -1,25 +1,27 @@
 """CSV import + processing-status endpoints."""
 from __future__ import annotations
 
-import sqlite3
+import asyncio
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from app.db.connection import get_db
-from app.models.schemas import ImportResult
 from app.services import ingestion
 
 router = APIRouter(prefix="/import", tags=["import"])
 
 
-@router.post("/csv", response_model=ImportResult)
+@router.post("/csv")
 async def import_csv(
     file: UploadFile = File(...),
     account_name: str = Form("Imported Account"),
-    conn: sqlite3.Connection = Depends(get_db),
-) -> ImportResult:
-    """Upload a bank CSV; parse, categorize, and persist it synchronously."""
+) -> dict:
+    """Upload a bank CSV; parse + categorize it in the background.
+
+    Returns a job id immediately. Poll ``/import/status/{job_id}`` for live
+    progress (processed / total) — large statements report real movement rather
+    than blocking one long request.
+    """
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Please upload a .csv file.")
     content = await file.read()
@@ -27,16 +29,10 @@ async def import_csv(
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
     job = ingestion.new_job(uuid.uuid4().hex)
-    status = await ingestion.run_import(conn, content, account_name, job)
-    return ImportResult(
-        imported=status.imported,
-        skipped_duplicates=status.skipped_duplicates,
-        skipped_invalid=status.skipped_invalid,
-        cache_hits=status.cache_hits,
-        llm_cleaned=status.llm_cleaned,
-        uncategorized=status.uncategorized,
-        errors=status.errors,
+    asyncio.create_task(
+        ingestion.run_import_job(job.job_id, content, account_name)
     )
+    return {"job_id": job.job_id}
 
 
 @router.get("/status/{job_id}")

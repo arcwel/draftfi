@@ -16,6 +16,9 @@ def connect(db_path: str | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
+    # Wait for locks instead of erroring — background jobs (import/sync) write
+    # while status polls and other requests read concurrently.
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 

@@ -8,6 +8,7 @@ export default function Dropzone() {
   const importing = useStore((s) => s.importing)
   const summary = useStore((s) => s.importSummary)
   const resetAll = useStore((s) => s.resetAll)
+  const progress = useStore((s) => s.importProgress)
   const inputRef = useRef(null)
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState(null)
@@ -63,9 +64,21 @@ export default function Dropzone() {
           ${dragging ? 'border-sky-400 bg-sky-950/40' : 'border-edge bg-panel hover:border-gray-500'}`}
       >
         {importing ? (
-          <div className="flex items-center justify-center gap-2 text-sm text-sky-300">
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-sky-400 border-t-transparent" />
-            Processing statement…
+          <div className="flex flex-col items-center justify-center gap-1.5 text-sm text-sky-300">
+            <div className="flex items-center gap-2">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-sky-400 border-t-transparent" />
+              {progress && progress.total > 0
+                ? `Processing ${progress.processed}/${progress.total}`
+                : 'Processing statement…'}
+            </div>
+            {progress && progress.total > 0 && (
+              <div className="h-1 w-full max-w-[180px] overflow-hidden rounded-full bg-ink">
+                <div
+                  className="h-full rounded-full bg-sky-400 transition-all"
+                  style={{ width: `${(progress.processed / progress.total) * 100}%` }}
+                />
+              </div>
+            )}
           </div>
         ) : (
           <div className="text-xs text-gray-400">

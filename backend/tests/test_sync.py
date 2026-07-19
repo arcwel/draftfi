@@ -41,7 +41,8 @@ async def test_sync_resolves_via_llm_when_available(conn, monkeypatch):
     monkeypatch.setattr(llm, "clean_merchant", fake_clean)
 
     result = await sync.resync(conn)
-    assert result.scanned == 2
+    assert result.total == 2
+    assert result.processed == 2
     assert result.recategorized == 2
     assert result.llm_cleaned == 2
     assert result.still_uncategorized == 0
@@ -61,7 +62,7 @@ async def test_sync_noop_when_llm_unavailable(conn, monkeypatch):
     monkeypatch.setattr(llm, "health", offline)
 
     result = await sync.resync(conn)
-    assert result.scanned == 1
+    assert result.total == 1
     assert result.recategorized == 0
     assert result.still_uncategorized == 1
     assert result.llm_available is False

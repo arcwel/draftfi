@@ -6,9 +6,27 @@ Uses a real temp-file database so connections opened per request share state
 from __future__ import annotations
 
 import importlib
+import time
 
 import pytest
 from fastapi.testclient import TestClient
+
+
+def _run_import(client, content, filename="chase_checking.csv", account="Chase"):
+    """Start an import and poll the background job to completion."""
+    r = client.post(
+        "/import/csv",
+        files={"file": (filename, content, "text/csv")},
+        data={"account_name": account},
+    )
+    assert r.status_code == 200
+    job_id = r.json()["job_id"]
+    for _ in range(200):
+        status = client.get(f"/import/status/{job_id}").json()
+        if status["state"] in ("done", "error"):
+            return status
+        time.sleep(0.02)
+    raise AssertionError("import did not finish in time")
 
 
 @pytest.fixture
@@ -67,7 +85,7 @@ def test_reset_clears_data_but_keeps_categories(client, monkeypatch):
     sample = (
         Path(__file__).resolve().parent.parent / "sample_data" / "chase_checking.csv"
     ).read_bytes()
-    client.post("/import/csv", files={"file": ("s.csv", sample, "text/csv")})
+    _run_import(client, sample)
     # Give the base plan some values and a sandbox branch.
     base = next(b for b in client.get("/branches").json() if b["is_base"])
     client.patch(f"/branches/{base['id']}", json={"parameters": {"starting_assets": 99}})
@@ -136,23 +154,13 @@ def test_import_and_override_flow(client, monkeypatch):
     sample = (
         Path(__file__).resolve().parent.parent / "sample_data" / "chase_checking.csv"
     ).read_bytes()
-    r = client.post(
-        "/import/csv",
-        files={"file": ("chase_checking.csv", sample, "text/csv")},
-        data={"account_name": "Chase Checking"},
-    )
-    assert r.status_code == 200
-    result = r.json()
+    result = _run_import(client, sample)
     assert result["imported"] == 6
     assert result["uncategorized"] == 6  # LLM offline -> all uncategorized
 
     # Re-import identical file -> all deduped.
-    r2 = client.post(
-        "/import/csv",
-        files={"file": ("chase_checking.csv", sample, "text/csv")},
-        data={"account_name": "Chase Checking"},
-    )
-    assert r2.json()["skipped_duplicates"] == 6
+    result2 = _run_import(client, sample)
+    assert result2["skipped_duplicates"] == 6
 
     # Override a category and confirm it propagates + caches.
     txs = client.get("/transactions").json()["items"]

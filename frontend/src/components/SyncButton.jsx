@@ -6,6 +6,13 @@ export default function SyncButton() {
   const sync = useStore((s) => s.sync)
   const syncing = useStore((s) => s.syncing)
   const result = useStore((s) => s.syncResult)
+  const progress = useStore((s) => s.syncProgress)
+
+  const label = syncing
+    ? progress && progress.total > 0
+      ? `Syncing ${progress.processed}/${progress.total}`
+      : 'Syncing…'
+    : 'Sync'
 
   return (
     <div className="flex items-center gap-2">
@@ -41,7 +48,7 @@ export default function SyncButton() {
           <path d="M21 12a9 9 0 1 1-2.64-6.36" />
           <path d="M21 3v6h-6" />
         </svg>
-        {syncing ? 'Syncing…' : 'Sync'}
+        {label}
       </button>
     </div>
   )

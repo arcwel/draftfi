@@ -38,8 +38,10 @@ export const useStore = create((set, get) => ({
   budget: null, // BudgetSummary: monthly spending + scenario impact
   importing: false,
   importSummary: null,
+  importProgress: null, // { processed, total } while an import runs
   syncing: false,
   syncResult: null, // { recategorized, still_uncategorized, ... } shown briefly
+  syncProgress: null, // { processed, total } while a sync runs
 
   // ---- bootstrapping ---- //
   async init() {
@@ -247,14 +249,17 @@ export const useStore = create((set, get) => ({
 
   // ---- import ---- //
   async importCsv(file, accountName) {
-    set({ importing: true, importSummary: null })
+    set({ importing: true, importSummary: null, importProgress: { processed: 0, total: 0 } })
     try {
-      const summary = await api.importCsv(file, accountName)
-      set({ importSummary: summary })
+      const { job_id } = await api.importCsv(file, accountName)
+      const final = await get()._pollJob(api.importStatus, job_id, (s) =>
+        set({ importProgress: { processed: s.processed, total: s.total } }),
+      )
+      set({ importSummary: final })
       await Promise.all([get().loadTransactions(), get().pollLlm()])
       await get().recompute()
     } finally {
-      set({ importing: false })
+      set({ importing: false, importProgress: null })
     }
   },
 
@@ -264,37 +269,46 @@ export const useStore = create((set, get) => ({
     await get().recompute()
   },
 
-  // Process new information: re-categorize unresolved rows + refresh everything.
-  async sync() {
-    if (get().syncing) return
-    set({ syncing: true })
-    try {
-      const result = await get()._runSync()
-      set({ syncResult: result })
-      // Clear the result banner after a few seconds.
-      setTimeout(() => {
-        if (get().syncResult === result) set({ syncResult: null })
-      }, 6000)
-    } finally {
-      set({ syncing: false })
+  // Poll a background job's status endpoint until it finishes, reporting
+  // progress via onProgress. Returns the final status object.
+  async _pollJob(statusFn, jobId, onProgress) {
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      let status
+      try {
+        status = await statusFn(jobId)
+      } catch {
+        return null
+      }
+      onProgress(status)
+      if (status.state === 'done' || status.state === 'error') return status
+      await new Promise((r) => setTimeout(r, 400))
     }
   },
 
-  async _runSync() {
-    let result = null
+  // Process new information: re-categorize unresolved rows + refresh everything.
+  async sync() {
+    if (get().syncing) return
+    set({ syncing: true, syncProgress: { processed: 0, total: 0 } })
     try {
-      result = await api.sync()
-    } catch {
-      /* sync endpoint failed; still refresh the view below */
+      const { job_id } = await api.sync()
+      const final = await get()._pollJob(api.syncStatus, job_id, (s) =>
+        set({ syncProgress: { processed: s.processed, total: s.total } }),
+      )
+      await Promise.all([
+        get().pollLlm(),
+        get().loadCategories(),
+        get().loadTransactions(),
+        get().loadBranches(),
+      ])
+      await get().recompute()
+      set({ syncResult: final })
+      setTimeout(() => {
+        if (get().syncResult === final) set({ syncResult: null })
+      }, 6000)
+    } finally {
+      set({ syncing: false, syncProgress: null })
     }
-    await Promise.all([
-      get().pollLlm(),
-      get().loadCategories(),
-      get().loadTransactions(),
-      get().loadBranches(),
-    ])
-    await get().recompute()
-    return result
   },
 
   // Wipe all financial data back to an empty slate (keeps categories + LLM keys).

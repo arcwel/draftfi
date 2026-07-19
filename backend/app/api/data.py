@@ -1,9 +1,11 @@
-"""Data-management endpoints (reset / clear)."""
+"""Data-management endpoints (sync / reset)."""
 from __future__ import annotations
 
+import asyncio
 import sqlite3
+import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.db import repository as repo
 from app.db.connection import get_db
@@ -14,10 +16,23 @@ router = APIRouter(tags=["data"])
 
 
 @router.post("/sync")
-async def sync(conn: sqlite3.Connection = Depends(get_db)) -> dict:
-    """Reprocess unresolved data (re-categorize 'Uncategorized' transactions)."""
-    result = await sync_service.resync(conn)
-    return result.to_dict()
+async def sync() -> dict:
+    """Start a background re-categorization of 'Uncategorized' transactions.
+
+    Returns a job id immediately; poll ``/sync/status/{job_id}`` for live
+    progress (processed / total) so large batches show real movement.
+    """
+    job = sync_service.new_job(uuid.uuid4().hex)
+    asyncio.create_task(sync_service.run_sync_job(job.job_id))
+    return {"job_id": job.job_id}
+
+
+@router.get("/sync/status/{job_id}")
+def sync_status(job_id: str) -> dict:
+    job = sync_service.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Unknown sync job.")
+    return job.to_dict()
 
 
 @router.post("/reset")

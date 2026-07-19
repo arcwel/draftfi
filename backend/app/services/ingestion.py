@@ -10,6 +10,7 @@ import sqlite3
 from dataclasses import asdict, dataclass, field
 
 from app.db import repository as repo
+from app.db.connection import session
 from app.services import categorization, llm, llm_config
 from app.services.csv_parser import parse_csv
 
@@ -103,7 +104,23 @@ async def run_import(
         # Refresh known category names in case the model created a new one.
         if result.resolution == "llm":
             category_names = [c["name"] for c in repo.list_categories(conn)]
+        # Commit periodically so progress is durable and status polls see it.
+        if status.processed % 20 == 0:
+            conn.commit()
 
     conn.commit()
     status.state = "done"
     return status
+
+
+async def run_import_job(job_id: str, content: bytes, account_hint: str) -> None:
+    """Background entry point: opens its own connection and runs the import."""
+    job = _JOBS.get(job_id)
+    if job is None:
+        return
+    try:
+        with session() as conn:
+            await run_import(conn, content, account_hint, job)
+    except Exception as exc:  # pragma: no cover - defensive
+        job.state = "error"
+        job.errors.append(str(exc))

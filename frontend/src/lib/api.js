@@ -59,6 +59,8 @@ export const api = {
     return request('/import/csv', { method: 'POST', body: form })
   },
 
+  importStatus: (jobId) => request(`/import/status/${jobId}`),
+
   simulate: (parameters, milestones) =>
     request('/simulate', {
       method: 'POST',
@@ -76,6 +78,8 @@ export const api = {
   resetData: () => request('/reset', { method: 'POST' }),
 
   sync: () => request('/sync', { method: 'POST' }),
+
+  syncStatus: (jobId) => request(`/sync/status/${jobId}`),
 
   setCategoryBudget: (categoryId, monthlyBudget) =>
     request(`/categories/${categoryId}/budget`, {
