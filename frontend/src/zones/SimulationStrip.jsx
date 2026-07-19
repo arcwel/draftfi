@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useStore } from '../store/useStore'
 import MilestoneModal from '../components/MilestoneModal'
+import ScenarioInput from '../components/ScenarioInput'
 
 const money = (n) =>
   new Intl.NumberFormat('en-US', {
@@ -121,6 +122,11 @@ export default function SimulationStrip() {
         >
           + Milestone
         </button>
+      </div>
+
+      {/* Full-width natural-language scenario row */}
+      <div className="w-full basis-full">
+        <ScenarioInput />
       </div>
 
       {modal && (

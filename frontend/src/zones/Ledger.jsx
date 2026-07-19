@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { ResolutionBadge } from '../components/CategoryBadge'
+import TransactionModal from '../components/TransactionModal'
 
 const money = (n) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n || 0)
@@ -13,8 +14,17 @@ export default function Ledger() {
   const total = useStore((s) => s.totalTransactions)
   const categories = useStore((s) => s.categories)
   const overrideCategory = useStore((s) => s.overrideCategory)
+  const deleteTransaction = useStore((s) => s.deleteTransaction)
   const [page, setPage] = useState(0)
   const [filter, setFilter] = useState('')
+  const [modal, setModal] = useState(null) // null | {} (add) | transaction (edit)
+
+  async function onDelete(t) {
+    const ok = window.confirm(
+      `Delete this transaction?\n\n${t.date} · ${t.clean_merchant || t.raw_description} · ${money(t.amount)}`,
+    )
+    if (ok) await deleteTransaction(t.id)
+  }
 
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase()
@@ -38,15 +48,23 @@ export default function Ledger() {
           Categorization Ledger
           <span className="ml-2 normal-case text-gray-600">{total} transactions</span>
         </h2>
-        <input
-          value={filter}
-          onChange={(e) => {
-            setFilter(e.target.value)
-            setPage(0)
-          }}
-          placeholder="Filter…"
-          className="w-40 rounded-md border border-edge bg-panel px-2 py-1 text-xs text-gray-200 focus:border-sky-500 focus:outline-none"
-        />
+        <div className="flex items-center gap-2">
+          <input
+            value={filter}
+            onChange={(e) => {
+              setFilter(e.target.value)
+              setPage(0)
+            }}
+            placeholder="Filter…"
+            className="w-40 rounded-md border border-edge bg-panel px-2 py-1 text-xs text-gray-200 focus:border-sky-500 focus:outline-none"
+          />
+          <button
+            onClick={() => setModal({})}
+            className="rounded-md bg-sky-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-sky-500"
+          >
+            + Add
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto">
@@ -63,7 +81,8 @@ export default function Ledger() {
                 <th className="px-2 py-1.5 text-left font-medium">Clean Merchant</th>
                 <th className="px-2 py-1.5 text-right font-medium">Amount</th>
                 <th className="px-2 py-1.5 text-left font-medium">Category</th>
-                <th className="px-4 py-1.5 text-left font-medium">Resolution</th>
+                <th className="px-2 py-1.5 text-left font-medium">Resolution</th>
+                <th className="px-3 py-1.5" />
               </tr>
             </thead>
             <tbody>
@@ -106,8 +125,24 @@ export default function Ledger() {
                       ))}
                     </select>
                   </td>
-                  <td className="px-4 py-1.5">
+                  <td className="px-2 py-1.5">
                     <ResolutionBadge resolution={t.resolution} />
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-1.5 text-right">
+                    <button
+                      onClick={() => setModal(t)}
+                      className="px-1 text-xs text-gray-500 hover:text-sky-300"
+                      title="Edit transaction"
+                    >
+                      ✎
+                    </button>
+                    <button
+                      onClick={() => onDelete(t)}
+                      className="px-1 text-xs text-gray-500 hover:text-rose-400"
+                      title="Delete transaction"
+                    >
+                      ✕
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -115,6 +150,13 @@ export default function Ledger() {
           </table>
         )}
       </div>
+
+      {modal && (
+        <TransactionModal
+          initial={modal.id != null ? modal : null}
+          onClose={() => setModal(null)}
+        />
+      )}
 
       {pages > 1 && (
         <div className="flex items-center justify-end gap-2 border-t border-edge px-4 py-1.5 text-xs text-gray-400">

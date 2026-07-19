@@ -269,6 +269,54 @@ export const useStore = create((set, get) => ({
     await get().recompute()
   },
 
+  // ---- manual transaction CRUD ---- //
+  async createTransaction(tx) {
+    await api.createTransaction(tx)
+    await get().loadTransactions()
+    await get().recompute()
+  },
+
+  async updateTransaction(txId, patch) {
+    await api.updateTransaction(txId, patch)
+    await get().loadTransactions()
+    await get().recompute()
+  },
+
+  async deleteTransaction(txId) {
+    await api.deleteTransaction(txId)
+    await get().loadTransactions()
+    await get().recompute()
+  },
+
+  // ---- natural-language scenario ---- //
+  scenarioParsing: false,
+  scenarioNote: null,
+
+  async applyScenarioText(text) {
+    set({ scenarioParsing: true, scenarioNote: null })
+    try {
+      const result = await api.parseScenario(text)
+      // Merge parsed inputs into the active plan.
+      const params = { ...get().parameters, ...result.parameters }
+      const milestones = [...get().milestones, ...result.milestones]
+      set({ parameters: params, milestones })
+      await get().persistActiveBranch()
+      await get().recompute()
+      const note =
+        result.note ||
+        (result.milestones.length
+          ? `Added ${result.milestones.length} milestone(s).`
+          : 'No changes detected in that description.')
+      set({ scenarioNote: note })
+      setTimeout(() => {
+        if (get().scenarioNote === note) set({ scenarioNote: null })
+      }, 10000)
+      return result
+    } finally {
+      set({ scenarioParsing: false })
+    }
+  },
+
   // Poll a background job's status endpoint until it finishes, reporting
   // progress via onProgress. Returns the final status object.
   async _pollJob(statusFn, jobId, onProgress) {

@@ -1,6 +1,7 @@
 import Dropzone from '../components/Dropzone'
 import BranchManager from '../components/BranchManager'
 import LLMConfigPanel from '../components/LLMConfigPanel'
+import DataTools from '../components/DataTools'
 
 function Section({ title, children }) {
   return (
@@ -25,6 +26,9 @@ export default function Sidebar() {
       </Section>
       <Section title="LLM Provider">
         <LLMConfigPanel />
+      </Section>
+      <Section title="Export & Backup">
+        <DataTools />
       </Section>
     </div>
   )

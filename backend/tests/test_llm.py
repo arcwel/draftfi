@@ -75,6 +75,51 @@ async def test_clean_merchant_unreachable_raises(monkeypatch):
         await llm.clean_merchant(OLLAMA, "X", ["Shopping"])
 
 
+def test_parse_batch_json_aligned_and_tolerant():
+    text = (
+        '{"items": [{"i": 1, "clean_merchant": "Amazon", "category": "Shopping"},'
+        '{"i": 3, "clean_merchant": "Shell", "category": "Transportation"}]}'
+    )
+    results = llm.parse_batch_json(text, 3)
+    assert results[0].clean_merchant == "Amazon"
+    assert results[1] is None  # model skipped #2 — caller retries individually
+    assert results[2].category == "Transportation"
+
+
+def test_parse_batch_json_rejects_garbage():
+    with pytest.raises(LLMError):
+        llm.parse_batch_json("not json at all", 2)
+
+
+@pytest.mark.asyncio
+async def test_clean_merchants_batch_one_call(monkeypatch):
+    calls = {"n": 0}
+
+    async def fake_generate(config, prompt, system):
+        calls["n"] += 1
+        return (
+            '{"items": [{"i": 1, "clean_merchant": "Netflix", "category": "Entertainment"},'
+            '{"i": 2, "clean_merchant": "Uber", "category": "Transportation"}]}'
+        )
+
+    monkeypatch.setattr(llm, "_generate", fake_generate)
+    results = await llm.clean_merchants_batch(
+        OLLAMA, ["NETFLIX.COM", "UBER TRIP"], ["Entertainment", "Transportation"]
+    )
+    assert calls["n"] == 1  # the whole batch cost one model call
+    assert [r.clean_merchant for r in results] == ["Netflix", "Uber"]
+
+
+@pytest.mark.asyncio
+async def test_generate_json_repairs_fenced_output(monkeypatch):
+    async def fake_generate(config, prompt, system):
+        return '```json\n{"milestones": [], "note": "ok"}\n```'
+
+    monkeypatch.setattr(llm, "_generate", fake_generate)
+    data = await llm.generate_json(OLLAMA, "sys", "prompt")
+    assert data["note"] == "ok"
+
+
 @pytest.mark.asyncio
 async def test_health_requires_key_for_cloud_provider():
     cfg = LLMConfig(

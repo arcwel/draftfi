@@ -140,6 +140,36 @@ def update_transaction_category(
     )
 
 
+TX_EDITABLE_FIELDS = {
+    "date",
+    "raw_description",
+    "amount",
+    "account_name",
+    "category_id",
+    "clean_merchant",
+    "resolution",
+}
+
+
+def update_transaction_fields(
+    conn: sqlite3.Connection, tx_id: int, fields: dict[str, Any]
+) -> None:
+    """Update an arbitrary subset of a transaction's editable fields."""
+    updates = {k: v for k, v in fields.items() if k in TX_EDITABLE_FIELDS}
+    if not updates:
+        return
+    assignments = ", ".join(f"{k} = ?" for k in updates)
+    conn.execute(
+        f"UPDATE transactions SET {assignments} WHERE id = ?",
+        (*updates.values(), tx_id),
+    )
+
+
+def delete_transaction(conn: sqlite3.Connection, tx_id: int) -> bool:
+    cur = conn.execute("DELETE FROM transactions WHERE id = ?", (tx_id,))
+    return cur.rowcount > 0
+
+
 def list_uncategorized_transactions(
     conn: sqlite3.Connection,
 ) -> list[dict[str, Any]]:

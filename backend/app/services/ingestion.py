@@ -65,48 +65,54 @@ async def run_import(
     available, _, _ = await llm.health(config)
     category_names = [c["name"] for c in repo.list_categories(conn)]
 
+    # Additive, non-destructive: rows already present are left exactly as they
+    # are (including manual category overrides). Skip them BEFORE any LLM work
+    # so re-imports are cheap and never mutate existing data.
+    pending: list = []
     for row in report.rows:
-        status.processed += 1
-        # Additive, non-destructive: a row already present is left exactly as it
-        # is (including any manual category override). We skip it BEFORE any LLM
-        # work so re-imports are cheap and never mutate existing data.
         if repo.transaction_exists(conn, row.import_hash):
+            status.processed += 1
             status.skipped_duplicates += 1
-            continue
-
-        result = await categorization.categorize_row(
-            conn, row, category_names, config, llm_available=available
-        )
-        tx_id = repo.insert_transaction(
-            conn,
-            {
-                "date": row.date,
-                "raw_description": row.raw_description,
-                "amount": row.amount,
-                "account_name": row.account_name,
-                "category_id": result.category_id,
-                "clean_merchant": result.clean_merchant,
-                "resolution": result.resolution,
-                "import_hash": row.import_hash,
-            },
-        )
-        if tx_id is None:
-            # Lost a race / exact-hash collision — still counts as unchanged.
-            status.skipped_duplicates += 1
-            continue
-        status.imported += 1
-        if result.resolution == "cache":
-            status.cache_hits += 1
-        elif result.resolution == "llm":
-            status.llm_cleaned += 1
         else:
-            status.uncategorized += 1
-        # Refresh known category names in case the model created a new one.
-        if result.resolution == "llm":
-            category_names = [c["name"] for c in repo.list_categories(conn)]
-        # Commit periodically so progress is durable and status polls see it.
-        if status.processed % 20 == 0:
-            conn.commit()
+            pending.append(row)
+
+    # Categorize in chunks: one LLM call per chunk instead of one per row.
+    CHUNK = 25
+    for start in range(0, len(pending), CHUNK):
+        chunk = pending[start : start + CHUNK]
+        outcomes = await categorization.categorize_rows_batch(
+            conn, chunk, category_names, config, llm_available=available
+        )
+        for row, result in zip(chunk, outcomes, strict=False):
+            tx_id = repo.insert_transaction(
+                conn,
+                {
+                    "date": row.date,
+                    "raw_description": row.raw_description,
+                    "amount": row.amount,
+                    "account_name": row.account_name,
+                    "category_id": result.category_id,
+                    "clean_merchant": result.clean_merchant,
+                    "resolution": result.resolution,
+                    "import_hash": row.import_hash,
+                },
+            )
+            status.processed += 1
+            if tx_id is None:
+                # Lost a race / exact-hash collision — counts as unchanged.
+                status.skipped_duplicates += 1
+                continue
+            status.imported += 1
+            if result.resolution == "cache":
+                status.cache_hits += 1
+            elif result.resolution == "llm":
+                status.llm_cleaned += 1
+            else:
+                status.uncategorized += 1
+        # New categories may have been created by the model this chunk.
+        category_names = [c["name"] for c in repo.list_categories(conn)]
+        # Commit per chunk so progress is durable and status polls see it.
+        conn.commit()
 
     conn.commit()
     status.state = "done"

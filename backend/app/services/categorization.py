@@ -81,3 +81,89 @@ async def categorize_row(
         category_id=category_id,
         resolution="llm",
     )
+
+
+async def categorize_rows_batch(
+    conn: sqlite3.Connection,
+    rows: list[ParsedRow],
+    category_names: list[str],
+    config: LLMConfig | None = None,
+    *,
+    llm_available: bool = True,
+) -> list[Categorized]:
+    """Resolve many rows at once: cache-first, then ONE LLM call for the misses.
+
+    Batching cuts a 500-row import from ~500 model calls to ~20. Rows the batch
+    response fails to cover fall back to individual calls; anything still
+    unresolved degrades to Uncategorized. Returns results aligned with ``rows``.
+    """
+    results: list[Categorized | None] = [None] * len(rows)
+    uncat_id = _resolve_category_id(conn, UNCATEGORIZED)
+
+    def uncategorized_for(row: ParsedRow) -> Categorized:
+        return Categorized(
+            clean_merchant=row.raw_description,
+            category_id=uncat_id,
+            resolution="uncategorized",
+        )
+
+    # Pass 1: cache hits (and duplicate descriptors within this same batch).
+    misses: list[int] = []
+    for i, row in enumerate(rows):
+        cached = repo.get_cache(conn, row.raw_description)
+        if cached is not None:
+            results[i] = Categorized(
+                clean_merchant=cached["clean_merchant"],
+                category_id=cached["category_id"],
+                resolution="cache",
+            )
+        else:
+            misses.append(i)
+
+    if not misses or not llm_available or config is None:
+        for i in misses:
+            results[i] = uncategorized_for(rows[i])
+        return [r for r in results if r is not None]
+
+    # Pass 2: one model call for the unique missing descriptors.
+    unique: list[str] = []
+    index_of: dict[str, int] = {}
+    for i in misses:
+        raw = rows[i].raw_description
+        if raw not in index_of:
+            index_of[raw] = len(unique)
+            unique.append(raw)
+
+    try:
+        batch = await llm.clean_merchants_batch(config, unique, category_names)
+    except llm.LLMError:
+        batch = [None] * len(unique)
+
+    for i in misses:
+        row = rows[i]
+        outcome = batch[index_of[row.raw_description]]
+        if outcome is None:
+            # Pass 3: individual retry for stragglers the batch missed.
+            try:
+                outcome = await llm.clean_merchant(
+                    config, row.raw_description, category_names
+                )
+            except llm.LLMError:
+                results[i] = uncategorized_for(row)
+                continue
+        # First resolution of a descriptor writes the cache; later duplicates
+        # in this batch resolve from it via get_cache on their own imports.
+        if repo.get_cache(conn, row.raw_description) is None:
+            category_id = _resolve_category_id(conn, outcome.category)
+            repo.put_cache(
+                conn, row.raw_description, outcome.clean_merchant, category_id
+            )
+        else:
+            category_id = _resolve_category_id(conn, outcome.category)
+        results[i] = Categorized(
+            clean_merchant=outcome.clean_merchant,
+            category_id=category_id,
+            resolution="llm",
+        )
+
+    return [r for r in results if r is not None]

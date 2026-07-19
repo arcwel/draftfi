@@ -49,6 +49,39 @@ export const api = {
       body: JSON.stringify({ category_id: categoryId }),
     }),
 
+  createTransaction: (tx) =>
+    request('/transactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(tx),
+    }),
+
+  updateTransaction: (txId, patch) =>
+    request(`/transactions/${txId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+
+  deleteTransaction: (txId) =>
+    request(`/transactions/${txId}`, { method: 'DELETE' }),
+
+  parseScenario: (text) =>
+    request('/scenario/parse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    }),
+
+  // Download links (used as <a href>) and backup restore.
+  exportUrl: (kind) => `${BASE}/export/${kind}`,
+
+  restoreBackup: (file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request('/export/restore', { method: 'POST', body: form })
+  },
+
   importCsv: (file, accountName) => {
     const form = new FormData()
     form.append('file', file)

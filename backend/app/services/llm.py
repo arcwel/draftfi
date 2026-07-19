@@ -200,6 +200,103 @@ async def _generate(config: LLMConfig, prompt: str, system: str) -> str:
     raise LLMError(f"Unknown provider: {config.provider}")  # pragma: no cover
 
 
+BATCH_SYSTEM_PROMPT = (
+    "You are a financial transaction normalizer. You receive a numbered list "
+    "of raw bank statement descriptors. For each one, identify the real-world "
+    "merchant and the best-fit spending category. Respond with ONLY a single "
+    "JSON object of the exact form: "
+    '{"items": [{"i": 1, "clean_merchant": "...", "category": "..."}, ...]} '
+    "with one element per input line, using each line's number as \"i\". "
+    "Choose categories from this list when possible: __CATEGORIES__. "
+    "Do not include markdown, code fences, or explanation."
+)
+
+
+def parse_batch_json(text: str, count: int) -> list[CleanResult | None]:
+    """Parse a batch response into an index-aligned list (None = unresolved)."""
+    candidate = text.strip()
+    if candidate.startswith("```"):
+        candidate = candidate.strip("`")
+        candidate = re.sub(r"^json\s*", "", candidate, flags=re.IGNORECASE).strip()
+    try:
+        data = json.loads(candidate)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise LLMError(f"Unparseable batch output: {text[:200]!r}") from exc
+    items = data.get("items") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        raise LLMError(f"Batch output missing 'items': {text[:200]!r}")
+
+    results: list[CleanResult | None] = [None] * count
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            idx = int(item.get("i", 0)) - 1
+        except (TypeError, ValueError):
+            continue
+        if 0 <= idx < count and item.get("clean_merchant"):
+            results[idx] = CleanResult(
+                clean_merchant=str(item["clean_merchant"]).strip() or "Unknown",
+                category=str(item.get("category", "Uncategorized")).strip()
+                or "Uncategorized",
+            )
+    return results
+
+
+async def clean_merchants_batch(
+    config: LLMConfig,
+    raw_descriptions: list[str],
+    categories: list[str],
+) -> list[CleanResult | None]:
+    """Clean + categorize many descriptors in ONE model call.
+
+    Returns an index-aligned list; entries the model failed to resolve are
+    ``None`` (the caller decides whether to retry them individually). Raises
+    ``LLMError`` when the endpoint is unreachable or output is unusable.
+    """
+    if not raw_descriptions:
+        return []
+    system = BATCH_SYSTEM_PROMPT.replace("__CATEGORIES__", ", ".join(categories))
+    lines = "\n".join(
+        f'{i + 1}. "{raw}"' for i, raw in enumerate(raw_descriptions)
+    )
+    prompt = f"Raw descriptors:\n{lines}"
+    try:
+        text = await _generate(config, prompt, system)
+    except httpx.HTTPError as exc:
+        raise LLMError(f"LLM endpoint error: {exc}") from exc
+    return parse_batch_json(text, len(raw_descriptions))
+
+
+async def generate_json(config: LLMConfig, system: str, prompt: str) -> dict:
+    """Run one JSON-mode generation and return the parsed object.
+
+    Generic helper for structured tasks beyond categorization (e.g. parsing a
+    natural-language scenario). Raises ``LLMError`` on transport/parse failure.
+    """
+    try:
+        text = await _generate(config, prompt, system)
+    except httpx.HTTPError as exc:
+        raise LLMError(f"LLM endpoint error: {exc}") from exc
+    candidate = text.strip()
+    if candidate.startswith("```"):
+        candidate = candidate.strip("`")
+        candidate = re.sub(r"^json\s*", "", candidate, flags=re.IGNORECASE).strip()
+    try:
+        data = json.loads(candidate)
+    except (json.JSONDecodeError, TypeError):
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if not match:
+            raise LLMError(f"Unparseable JSON output: {text[:200]!r}") from None
+        try:
+            data = json.loads(match.group(0))
+        except json.JSONDecodeError as exc:
+            raise LLMError(f"Unparseable JSON output: {text[:200]!r}") from exc
+    if not isinstance(data, dict):
+        raise LLMError("Model returned non-object JSON")
+    return data
+
+
 async def clean_merchant(
     config: LLMConfig,
     raw_description: str,

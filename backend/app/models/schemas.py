@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-Resolution = Literal["cache", "llm", "override", "uncategorized"]
+Resolution = Literal["cache", "llm", "override", "uncategorized", "manual"]
 
 
 class Category(BaseModel):
@@ -47,6 +47,24 @@ class ImportResult(BaseModel):
 
 class CategoryOverride(BaseModel):
     category_id: int
+
+
+class TransactionCreate(BaseModel):
+    date: str
+    amount: float
+    raw_description: str = Field(min_length=1)
+    account_name: str = "Manual Entry"
+    category_id: int | None = None
+    clean_merchant: str | None = None
+
+
+class TransactionUpdate(BaseModel):
+    date: str | None = None
+    amount: float | None = None
+    raw_description: str | None = None
+    account_name: str | None = None
+    category_id: int | None = None
+    clean_merchant: str | None = None
 
 
 class LLMStatus(BaseModel):
@@ -220,3 +238,17 @@ class BudgetRequest(BaseModel):
 
 class BudgetOverride(BaseModel):
     monthly_budget: float | None = None
+
+
+# --------------------------------------------------------------------------- #
+# Natural-language scenario parsing
+# --------------------------------------------------------------------------- #
+class ScenarioParseRequest(BaseModel):
+    text: str = Field(min_length=3, max_length=2000)
+
+
+class ScenarioParseResult(BaseModel):
+    milestones: list[Milestone] = Field(default_factory=list)
+    # Partial SimulationParameters overrides (only keys the text implied).
+    parameters: dict = Field(default_factory=dict)
+    note: str | None = None

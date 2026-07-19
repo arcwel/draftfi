@@ -52,7 +52,7 @@ def get_job(job_id: str) -> SyncJob | None:
 
 
 async def _run(conn: sqlite3.Connection, job: SyncJob) -> None:
-    """Categorize every unresolved row, updating the job as it goes."""
+    """Categorize every unresolved row in chunks, updating the job as it goes."""
     config = llm_config.resolve_config(conn)
     available, _, _ = await llm.health(config)
     job.llm_available = available
@@ -61,36 +61,42 @@ async def _run(conn: sqlite3.Connection, job: SyncJob) -> None:
     rows = repo.list_uncategorized_transactions(conn)
     job.total = len(rows)
 
-    for tx in rows:
-        parsed = ParsedRow(
-            date=tx["date"],
-            raw_description=tx["raw_description"],
-            amount=tx["amount"],
-            account_name=tx["account_name"],
-        )
-        outcome = await categorization.categorize_row(
-            conn, parsed, category_names, config, llm_available=available
-        )
-        if outcome.resolution in ("cache", "llm"):
-            repo.apply_categorization(
-                conn,
-                int(tx["id"]),
-                outcome.category_id,
-                outcome.clean_merchant,
-                outcome.resolution,
+    # One LLM call per chunk (see categorize_rows_batch) instead of per row.
+    CHUNK = 25
+    for start in range(0, len(rows), CHUNK):
+        chunk = rows[start : start + CHUNK]
+        parsed_chunk = [
+            ParsedRow(
+                date=tx["date"],
+                raw_description=tx["raw_description"],
+                amount=tx["amount"],
+                account_name=tx["account_name"],
             )
-            job.recategorized += 1
-            if outcome.resolution == "cache":
-                job.cache_hits += 1
+            for tx in chunk
+        ]
+        outcomes = await categorization.categorize_rows_batch(
+            conn, parsed_chunk, category_names, config, llm_available=available
+        )
+        for tx, outcome in zip(chunk, outcomes, strict=False):
+            if outcome.resolution in ("cache", "llm"):
+                repo.apply_categorization(
+                    conn,
+                    int(tx["id"]),
+                    outcome.category_id,
+                    outcome.clean_merchant,
+                    outcome.resolution,
+                )
+                job.recategorized += 1
+                if outcome.resolution == "cache":
+                    job.cache_hits += 1
+                else:
+                    job.llm_cleaned += 1
             else:
-                job.llm_cleaned += 1
-                category_names = [c["name"] for c in repo.list_categories(conn)]
-        else:
-            job.still_uncategorized += 1
-        job.processed += 1
-        # Commit periodically so progress is durable and status reads see it.
-        if job.processed % 20 == 0:
-            conn.commit()
+                job.still_uncategorized += 1
+            job.processed += 1
+        category_names = [c["name"] for c in repo.list_categories(conn)]
+        # Commit per chunk so progress is durable and status reads see it.
+        conn.commit()
 
     conn.commit()
 
