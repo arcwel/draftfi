@@ -27,6 +27,8 @@ export default function TransactionModal({ initial, onClose }) {
     clean_merchant: initial?.clean_merchant ?? '',
     account_name: initial?.account_name ?? 'Manual Entry',
     category_id: initial?.category_id ?? '',
+    note: initial?.note ?? '',
+    tags: (initial?.tags ?? []).join(', '),
   })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -46,6 +48,11 @@ export default function TransactionModal({ initial, onClose }) {
         clean_merchant: form.clean_merchant.trim() || null,
         account_name: form.account_name.trim() || 'Manual Entry',
         category_id: form.category_id === '' ? null : Number(form.category_id),
+        note: form.note.trim() || null,
+        tags: form.tags
+          .split(',')
+          .map((t) => t.trim())
+          .filter(Boolean),
       }
       if (editing) await updateTransaction(initial.id, payload)
       else await createTransaction(payload)
@@ -129,6 +136,26 @@ export default function TransactionModal({ initial, onClose }) {
                   </option>
                 ))}
               </select>
+            </Field>
+          </div>
+          <div className="col-span-2">
+            <Field label="Note (optional)">
+              <input
+                className={inputCls}
+                value={form.note}
+                placeholder="e.g. reimbursable — submit to HR"
+                onChange={(e) => setForm({ ...form, note: e.target.value })}
+              />
+            </Field>
+          </div>
+          <div className="col-span-2">
+            <Field label="Tags (comma-separated, optional)">
+              <input
+                className={inputCls}
+                value={form.tags}
+                placeholder="e.g. travel, reimbursable"
+                onChange={(e) => setForm({ ...form, tags: e.target.value })}
+              />
             </Field>
           </div>
         </div>

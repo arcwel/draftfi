@@ -82,6 +82,9 @@ progress, export/backup/restore, reset, one-click desktop app.
       "v0.3.0 available" linking to the download.
 - [ ] F2. **Single-instance guard + tray/menu-bar icon** — reopening the app
       focuses the existing window; quick-quit from the tray.
+- [ ] F3. **Linux build** — PyInstaller on `ubuntu-latest` in the release
+      matrix (tarball; webview falls back to the browser where WebKitGTK is
+      absent), published as `DraftFi-linux.tar.gz`.
 
 ## Batch G — Security & quality
 *Code: `services/llm_config.py`, `db/`, `frontend/src/lib/format.js` (new), CI, frontend tests*
@@ -100,5 +103,5 @@ progress, export/backup/restore, reset, one-click desktop app.
 E (engine fidelity) → A (LLM polish) → F (desktop polish) → G (hardening).
 G3/G4 are cheap and can ride along with any batch.
 
-*Explicitly out of scope (owner decision): code signing, Intel-Mac/Linux
-builds, onboarding tour, light theme.*
+*Explicitly out of scope (owner decision): code signing, Intel-Mac build,
+onboarding tour, light theme.*

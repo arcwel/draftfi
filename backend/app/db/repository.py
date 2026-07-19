@@ -108,21 +108,70 @@ def insert_transaction(conn: sqlite3.Connection, tx: dict[str, Any]) -> int | No
         return None
 
 
+_TX_SORT_COLUMNS = {"date": "t.date", "amount": "t.amount", "id": "t.id"}
+
+
+def _tx_filters(
+    q: str | None, date_from: str | None, date_to: str | None
+) -> tuple[str, list[Any]]:
+    """Build the shared WHERE clause for transaction search/count."""
+    clauses: list[str] = []
+    params: list[Any] = []
+    if q:
+        like = f"%{q}%"
+        clauses.append(
+            "(t.raw_description LIKE ? OR t.clean_merchant LIKE ? "
+            "OR c.name LIKE ? OR t.note LIKE ? OR t.tags LIKE ?)"
+        )
+        params += [like, like, like, like, like]
+    if date_from:
+        clauses.append("t.date >= ?")
+        params.append(date_from)
+    if date_to:
+        clauses.append("t.date <= ?")
+        params.append(date_to)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    return where, params
+
+
 def list_transactions(
-    conn: sqlite3.Connection, limit: int = 100, offset: int = 0
+    conn: sqlite3.Connection,
+    limit: int = 100,
+    offset: int = 0,
+    q: str | None = None,
+    sort_by: str = "date",
+    sort_dir: str = "desc",
+    date_from: str | None = None,
+    date_to: str | None = None,
 ) -> list[dict[str, Any]]:
+    where, params = _tx_filters(q, date_from, date_to)
+    col = _TX_SORT_COLUMNS.get(sort_by, "t.date")
+    direction = "ASC" if sort_dir.lower() == "asc" else "DESC"
     return _rows(
         conn.execute(
             "SELECT t.*, c.name AS category_name, c.color AS category_color "
             "FROM transactions t LEFT JOIN categories c ON t.category_id = c.id "
-            "ORDER BY t.date DESC, t.id DESC LIMIT ? OFFSET ?",
-            (limit, offset),
+            f"{where} ORDER BY {col} {direction}, t.id {direction} "
+            "LIMIT ? OFFSET ?",
+            (*params, limit, offset),
         ).fetchall()
     )
 
 
-def count_transactions(conn: sqlite3.Connection) -> int:
-    return int(conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0])
+def count_transactions(
+    conn: sqlite3.Connection,
+    q: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> int:
+    where, params = _tx_filters(q, date_from, date_to)
+    return int(
+        conn.execute(
+            "SELECT COUNT(*) FROM transactions t "
+            f"LEFT JOIN categories c ON t.category_id = c.id {where}",
+            params,
+        ).fetchone()[0]
+    )
 
 
 def get_transaction(conn: sqlite3.Connection, tx_id: int) -> dict[str, Any] | None:
@@ -148,6 +197,8 @@ TX_EDITABLE_FIELDS = {
     "category_id",
     "clean_merchant",
     "resolution",
+    "note",
+    "tags",
 }
 
 
@@ -166,8 +217,128 @@ def update_transaction_fields(
 
 
 def delete_transaction(conn: sqlite3.Connection, tx_id: int) -> bool:
+    # Children of a split are removed with their parent (ON DELETE CASCADE
+    # requires foreign_keys pragma; delete explicitly to be safe).
+    conn.execute("DELETE FROM transactions WHERE parent_tx_id = ?", (tx_id,))
     cur = conn.execute("DELETE FROM transactions WHERE id = ?", (tx_id,))
     return cur.rowcount > 0
+
+
+# --------------------------------------------------------------------------- #
+# Split transactions
+# --------------------------------------------------------------------------- #
+def split_transaction(
+    conn: sqlite3.Connection,
+    parent: dict[str, Any],
+    splits: list[dict[str, Any]],
+) -> list[int]:
+    """Split a transaction into parts (e.g. one Costco run → two categories).
+
+    The parent row is kept (its import_hash still blocks re-import duplicates)
+    but flagged so aggregations skip it; the children carry the amounts.
+    """
+    child_ids: list[int] = []
+    for part in splits:
+        cur = conn.execute(
+            "INSERT INTO transactions "
+            "(date, raw_description, amount, account_name, category_id, "
+            " clean_merchant, resolution, import_hash, parent_tx_id, note) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'split', NULL, ?, ?)",
+            (
+                parent["date"],
+                parent["raw_description"],
+                part["amount"],
+                parent["account_name"],
+                part.get("category_id"),
+                parent.get("clean_merchant") or parent["raw_description"],
+                parent["id"],
+                part.get("note"),
+            ),
+        )
+        child_ids.append(int(cur.lastrowid))
+    conn.execute(
+        "UPDATE transactions SET is_split_parent = 1 WHERE id = ?",
+        (parent["id"],),
+    )
+    return child_ids
+
+
+def unsplit_transaction(conn: sqlite3.Connection, parent_id: int) -> int:
+    """Remove a split: delete children, restore the parent to a normal row."""
+    cur = conn.execute(
+        "DELETE FROM transactions WHERE parent_tx_id = ?", (parent_id,)
+    )
+    conn.execute(
+        "UPDATE transactions SET is_split_parent = 0 WHERE id = ?", (parent_id,)
+    )
+    return cur.rowcount
+
+
+def list_split_children(
+    conn: sqlite3.Connection, parent_id: int
+) -> list[dict[str, Any]]:
+    return _rows(
+        conn.execute(
+            "SELECT t.*, c.name AS category_name, c.color AS category_color "
+            "FROM transactions t LEFT JOIN categories c ON t.category_id = c.id "
+            "WHERE t.parent_tx_id = ? ORDER BY t.id",
+            (parent_id,),
+        ).fetchall()
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Category management
+# --------------------------------------------------------------------------- #
+def update_category(
+    conn: sqlite3.Connection,
+    category_id: int,
+    name: str | None = None,
+    color: str | None = None,
+) -> None:
+    if name is not None:
+        conn.execute(
+            "UPDATE categories SET name = ? WHERE id = ?", (name, category_id)
+        )
+    if color is not None:
+        conn.execute(
+            "UPDATE categories SET color = ? WHERE id = ?", (color, category_id)
+        )
+
+
+def merge_category(
+    conn: sqlite3.Connection, source_id: int, target_id: int
+) -> int:
+    """Move everything from source category into target, then delete source.
+
+    Re-points transactions AND cache rules so future imports follow the merge.
+    Returns the number of transactions moved.
+    """
+    cur = conn.execute(
+        "UPDATE transactions SET category_id = ? WHERE category_id = ?",
+        (target_id, source_id),
+    )
+    conn.execute(
+        "UPDATE merchant_llm_cache SET category_id = ? WHERE category_id = ?",
+        (target_id, source_id),
+    )
+    conn.execute("DELETE FROM categories WHERE id = ?", (source_id,))
+    return cur.rowcount
+
+
+def delete_category(
+    conn: sqlite3.Connection, category_id: int, fallback_id: int | None
+) -> None:
+    """Delete a category, re-pointing its transactions/cache to a fallback."""
+    conn.execute(
+        "UPDATE transactions SET category_id = ? WHERE category_id = ?",
+        (fallback_id, category_id),
+    )
+    conn.execute(
+        "UPDATE merchant_llm_cache SET category_id = ? WHERE category_id = ?",
+        (fallback_id, category_id),
+    )
+    conn.execute("DELETE FROM categories WHERE id = ?", (category_id,))
 
 
 def list_uncategorized_transactions(
@@ -176,8 +347,9 @@ def list_uncategorized_transactions(
     """Transactions that never got a resolved category (e.g. imported offline)."""
     return _rows(
         conn.execute(
-            "SELECT * FROM transactions WHERE resolution = 'uncategorized' "
-            "OR resolution IS NULL"
+            "SELECT * FROM transactions "
+            "WHERE (resolution = 'uncategorized' OR resolution IS NULL) "
+            "AND is_split_parent = 0"
         ).fetchall()
     )
 
@@ -214,12 +386,16 @@ def apply_category_to_raw(
 
 
 def category_totals(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    """Aggregate signed amounts by category — feeds simulation baselines."""
+    """Aggregate signed amounts by category — feeds simulation baselines.
+
+    Split parents are excluded: their children carry the amounts.
+    """
     return _rows(
         conn.execute(
             "SELECT c.id AS category_id, c.name AS category_name, "
             "SUM(t.amount) AS total, COUNT(*) AS n "
             "FROM transactions t LEFT JOIN categories c ON t.category_id = c.id "
+            "WHERE t.is_split_parent = 0 "
             "GROUP BY t.category_id"
         ).fetchall()
     )
@@ -256,6 +432,7 @@ def category_breakdown(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             "COALESCE(SUM(t.amount), 0) AS total, COUNT(t.id) AS n "
             "FROM categories c "
             "JOIN transactions t ON t.category_id = c.id "
+            "WHERE t.is_split_parent = 0 "
             "GROUP BY c.id "
             "ORDER BY SUM(t.amount) ASC"
         ).fetchall()

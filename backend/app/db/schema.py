@@ -100,6 +100,21 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         ALTER TABLE categories ADD COLUMN monthly_budget REAL;
         """,
     ),
+    (
+        5,
+        "ledger depth: split transactions, notes, and tags",
+        """
+        -- A split parent keeps its row (and import_hash for dedupe) but is
+        -- excluded from aggregations; its children carry the amounts.
+        ALTER TABLE transactions ADD COLUMN parent_tx_id INTEGER
+            REFERENCES transactions(id) ON DELETE CASCADE;
+        ALTER TABLE transactions ADD COLUMN is_split_parent INTEGER
+            NOT NULL DEFAULT 0;
+        ALTER TABLE transactions ADD COLUMN note TEXT;
+        ALTER TABLE transactions ADD COLUMN tags TEXT;  -- JSON array of strings
+        CREATE INDEX IF NOT EXISTS idx_tx_parent ON transactions(parent_tx_id);
+        """,
+    ),
 ]
 
 # Default budget categories with visualization colors (Tailwind-ish hexes).

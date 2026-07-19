@@ -1,11 +1,12 @@
 """API schema models."""
 from __future__ import annotations
 
+import json
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-Resolution = Literal["cache", "llm", "override", "uncategorized", "manual"]
+Resolution = Literal["cache", "llm", "override", "uncategorized", "manual", "split"]
 
 
 class Category(BaseModel):
@@ -26,6 +27,24 @@ class Transaction(BaseModel):
     category_color: str | None = None
     clean_merchant: str | None = None
     resolution: Resolution | None = None
+    parent_tx_id: int | None = None
+    is_split_parent: bool = False
+    note: str | None = None
+    tags: list[str] = Field(default_factory=list)
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _tags_from_db(cls, v):
+        """The DB stores tags as a JSON string; accept both forms."""
+        if v is None:
+            return []
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+                return parsed if isinstance(parsed, list) else []
+            except json.JSONDecodeError:
+                return []
+        return v
 
 
 class TransactionPage(BaseModel):
@@ -56,6 +75,8 @@ class TransactionCreate(BaseModel):
     account_name: str = "Manual Entry"
     category_id: int | None = None
     clean_merchant: str | None = None
+    note: str | None = None
+    tags: list[str] = Field(default_factory=list)
 
 
 class TransactionUpdate(BaseModel):
@@ -65,6 +86,32 @@ class TransactionUpdate(BaseModel):
     account_name: str | None = None
     category_id: int | None = None
     clean_merchant: str | None = None
+    note: str | None = None
+    tags: list[str] | None = None
+
+
+class SplitPart(BaseModel):
+    amount: float
+    category_id: int | None = None
+    note: str | None = None
+
+
+class SplitRequest(BaseModel):
+    splits: list[SplitPart] = Field(min_length=2, max_length=10)
+
+
+class CategoryCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    color: str = Field(default="#64748B", pattern=r"^#[0-9a-fA-F]{6}$")
+
+
+class CategoryUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=60)
+    color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+
+
+class CategoryMerge(BaseModel):
+    target_id: int
 
 
 class LLMStatus(BaseModel):

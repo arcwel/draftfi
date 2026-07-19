@@ -39,8 +39,46 @@ export const api = {
 
   categories: () => request('/categories'),
 
-  transactions: (limit = 200, offset = 0) =>
-    request(`/transactions?limit=${limit}&offset=${offset}`),
+  transactions: ({ limit = 50, offset = 0, q, sort_by, sort_dir } = {}) => {
+    const params = new URLSearchParams({ limit, offset })
+    if (q) params.set('q', q)
+    if (sort_by) params.set('sort_by', sort_by)
+    if (sort_dir) params.set('sort_dir', sort_dir)
+    return request(`/transactions?${params}`)
+  },
+
+  splitTransaction: (txId, splits) =>
+    request(`/transactions/${txId}/split`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ splits }),
+    }),
+
+  unsplitTransaction: (txId) =>
+    request(`/transactions/${txId}/unsplit`, { method: 'POST' }),
+
+  createCategory: (name, color) =>
+    request('/categories', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, color }),
+    }),
+
+  updateCategory: (id, patch) =>
+    request(`/categories/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+
+  deleteCategory: (id) => request(`/categories/${id}`, { method: 'DELETE' }),
+
+  mergeCategory: (id, targetId) =>
+    request(`/categories/${id}/merge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target_id: targetId }),
+    }),
 
   overrideCategory: (txId, categoryId) =>
     request(`/transactions/${txId}/category`, {

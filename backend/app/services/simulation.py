@@ -34,7 +34,8 @@ def derive_baseline(conn: sqlite3.Connection) -> tuple[float, float]:
     large statement does not distort the monthly rate.
     """
     rows = conn.execute(
-        "SELECT amount, substr(date, 1, 7) AS ym FROM transactions"
+        "SELECT amount, substr(date, 1, 7) AS ym FROM transactions "
+        "WHERE is_split_parent = 0"
     ).fetchall()
     if not rows:
         return 0.0, 0.0

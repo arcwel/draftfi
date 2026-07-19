@@ -84,9 +84,39 @@ export const useStore = create((set, get) => ({
     set({ categories: await api.categories() })
   },
 
+  // Ledger query state — search/sort/paging run server-side over the full DB.
+  txQuery: '',
+  txSort: { by: 'date', dir: 'desc' },
+  txPage: 0,
+  txPageSize: 50,
+
   async loadTransactions() {
-    const page = await api.transactions(500, 0)
+    const { txQuery, txSort, txPage, txPageSize } = get()
+    const page = await api.transactions({
+      limit: txPageSize,
+      offset: txPage * txPageSize,
+      q: txQuery || undefined,
+      sort_by: txSort.by,
+      sort_dir: txSort.dir,
+    })
     set({ transactions: page.items, totalTransactions: page.total })
+  },
+
+  setTxQuery(q) {
+    set({ txQuery: q, txPage: 0 })
+    get().loadTransactions()
+  },
+
+  setTxSort(by) {
+    const cur = get().txSort
+    const dir = cur.by === by && cur.dir === 'desc' ? 'asc' : 'desc'
+    set({ txSort: { by, dir }, txPage: 0 })
+    get().loadTransactions()
+  },
+
+  setTxPage(page) {
+    set({ txPage: Math.max(0, page) })
+    get().loadTransactions()
   },
 
   async pollLlm() {
@@ -285,6 +315,42 @@ export const useStore = create((set, get) => ({
   async deleteTransaction(txId) {
     await api.deleteTransaction(txId)
     await get().loadTransactions()
+    await get().recompute()
+  },
+
+  async splitTransaction(txId, splits) {
+    await api.splitTransaction(txId, splits)
+    await get().loadTransactions()
+    await get().recompute()
+  },
+
+  async unsplitTransaction(txId) {
+    await api.unsplitTransaction(txId)
+    await get().loadTransactions()
+    await get().recompute()
+  },
+
+  // ---- category management ---- //
+  async createCategory(name, color) {
+    await api.createCategory(name, color)
+    await Promise.all([get().loadCategories(), get().loadBudget()])
+  },
+
+  async updateCategory(id, patch) {
+    await api.updateCategory(id, patch)
+    await Promise.all([get().loadCategories(), get().loadTransactions()])
+    await get().loadBudget()
+  },
+
+  async deleteCategory(id) {
+    await api.deleteCategory(id)
+    await Promise.all([get().loadCategories(), get().loadTransactions()])
+    await get().recompute()
+  },
+
+  async mergeCategory(id, targetId) {
+    await api.mergeCategory(id, targetId)
+    await Promise.all([get().loadCategories(), get().loadTransactions()])
     await get().recompute()
   },
 
