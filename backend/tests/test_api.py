@@ -40,12 +40,48 @@ def test_categories_seeded(client):
     assert "Groceries" in names
 
 
-def test_base_branch_exists_and_immutable(client):
+def test_base_branch_is_editable_but_not_deletable(client):
     branches = client.get("/branches").json()
     base = next(b for b in branches if b["is_base"])
-    # Base cannot be mutated.
-    r = client.patch(f"/branches/{base['id']}", json={"name": "Hacked"})
-    assert r.status_code == 403
+    # The base is the user's real baseline — it can be edited...
+    r = client.patch(
+        f"/branches/{base['id']}",
+        json={"parameters": {"starting_assets": 12000, "monthly_inflow": 4000}},
+    )
+    assert r.status_code == 200
+    assert r.json()["parameters"]["starting_assets"] == 12000
+    # ...but it cannot be deleted.
+    assert client.delete(f"/branches/{base['id']}").status_code == 403
+
+
+def test_reset_clears_data_but_keeps_categories(client, monkeypatch):
+    from app.services import llm
+
+    async def offline(config):
+        return False, None, "offline"
+
+    monkeypatch.setattr(llm, "health", offline)
+
+    from pathlib import Path
+
+    sample = (
+        Path(__file__).resolve().parent.parent / "sample_data" / "chase_checking.csv"
+    ).read_bytes()
+    client.post("/import/csv", files={"file": ("s.csv", sample, "text/csv")})
+    # Give the base plan some values and a sandbox branch.
+    base = next(b for b in client.get("/branches").json() if b["is_base"])
+    client.patch(f"/branches/{base['id']}", json={"parameters": {"starting_assets": 99}})
+    client.post("/branches", json={"name": "Scratch"})
+    assert client.get("/transactions").json()["total"] > 0
+
+    r = client.post("/reset")
+    assert r.status_code == 200
+    assert client.get("/transactions").json()["total"] == 0
+    branches = client.get("/branches").json()
+    assert len(branches) == 1 and branches[0]["is_base"]
+    assert branches[0]["parameters"]["starting_assets"] == 0
+    # Categories survive a reset.
+    assert any(c["name"] == "Groceries" for c in client.get("/categories").json())
 
 
 def test_branch_lifecycle_and_immutability(client):

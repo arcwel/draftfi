@@ -81,14 +81,15 @@ def update_branch(
     body: BranchUpdate,
     conn: sqlite3.Connection = Depends(get_db),
 ) -> Branch:
-    """Mutate a sandbox branch. The protected Base Plan is immutable."""
+    """Update a plan's parameters/milestones.
+
+    The Base Plan is editable — it represents your real financial baseline. It's
+    protected only from deletion (see DELETE), and sandbox branches are
+    independent copies, so experimenting in a branch never changes the base.
+    """
     branch = repo.get_branch(conn, branch_id)
     if branch is None:
         raise HTTPException(status_code=404, detail="Branch not found.")
-    if branch["is_base"]:
-        raise HTTPException(
-            status_code=403, detail="Base Plan is immutable; branch it first."
-        )
     repo.update_branch(
         conn,
         branch_id,

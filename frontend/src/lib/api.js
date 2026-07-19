@@ -73,6 +73,8 @@ export const api = {
       body: JSON.stringify({ parameters, milestones }),
     }),
 
+  resetData: () => request('/reset', { method: 'POST' }),
+
   setCategoryBudget: (categoryId, monthlyBudget) =>
     request(`/categories/${categoryId}/budget`, {
       method: 'PATCH',

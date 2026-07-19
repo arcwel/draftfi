@@ -52,17 +52,44 @@ export default function SimulationStrip() {
         </div>
       </div>
 
-      {/* Quick parameter chips */}
+      {/* Manual financial inputs — leave income/spending on "Auto" to derive
+          them from imported transactions instead. */}
+      <ParamChip
+        label="Income/mo"
+        value={parameters.monthly_inflow}
+        onChange={(v) => setParam('monthly_inflow', v)}
+        format={money}
+        allowAuto
+      />
+      <ParamChip
+        label="Spending/mo"
+        value={parameters.monthly_outflow}
+        onChange={(v) => setParam('monthly_outflow', v)}
+        format={money}
+        allowAuto
+      />
+      <ParamChip
+        label="Assets"
+        value={parameters.starting_assets}
+        onChange={(v) => setParam('starting_assets', v)}
+        format={money}
+      />
+      <ParamChip
+        label="Debt"
+        value={parameters.starting_debt}
+        onChange={(v) => setParam('starting_debt', v)}
+        format={money}
+      />
+      <ParamChip
+        label="Cash"
+        value={parameters.starting_cash}
+        onChange={(v) => setParam('starting_cash', v)}
+        format={money}
+      />
       <ParamChip
         label="Safety floor"
         value={parameters.safety_floor}
         onChange={(v) => setParam('safety_floor', v)}
-        format={money}
-      />
-      <ParamChip
-        label="Starting cash"
-        value={parameters.starting_cash}
-        onChange={(v) => setParam('starting_cash', v)}
         format={money}
       />
 
@@ -111,15 +138,18 @@ export default function SimulationStrip() {
   )
 }
 
-function ParamChip({ label, value, onChange, format }) {
+function ParamChip({ label, value, onChange, format, allowAuto = false }) {
   const [editing, setEditing] = useState(false)
+  const isAuto = allowAuto && (value === null || value === undefined)
   return editing ? (
     <input
       autoFocus
       type="number"
-      defaultValue={value}
+      defaultValue={isAuto ? '' : value}
+      placeholder={allowAuto ? 'auto' : ''}
       onBlur={(e) => {
-        onChange(Number(e.target.value))
+        const raw = e.target.value.trim()
+        onChange(raw === '' && allowAuto ? null : Number(raw))
         setEditing(false)
       }}
       onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
@@ -129,9 +159,12 @@ function ParamChip({ label, value, onChange, format }) {
     <button
       onClick={() => setEditing(true)}
       className="rounded-md border border-edge bg-panel px-2.5 py-1 text-xs"
+      title={allowAuto ? 'Blank = derive from imported transactions' : undefined}
     >
       <span className="text-gray-500">{label}: </span>
-      <span className="font-medium text-gray-200">{format(value)}</span>
+      <span className={`font-medium ${isAuto ? 'text-gray-500' : 'text-gray-200'}`}>
+        {isAuto ? 'Auto' : format(value)}
+      </span>
     </button>
   )
 }

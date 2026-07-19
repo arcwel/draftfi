@@ -7,10 +7,25 @@ export default function Dropzone() {
   const importCsv = useStore((s) => s.importCsv)
   const importing = useStore((s) => s.importing)
   const summary = useStore((s) => s.importSummary)
+  const resetAll = useStore((s) => s.resetAll)
   const inputRef = useRef(null)
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState(null)
   const [account, setAccount] = useState('')
+
+  async function handleReset() {
+    const ok = window.confirm(
+      'Reset all data?\n\nThis deletes every transaction, sandbox branch, and ' +
+        'budget target, and clears your plan back to $0. Your categories and ' +
+        'LLM settings are kept. This cannot be undone.',
+    )
+    if (!ok) return
+    try {
+      await resetAll()
+    } catch (e) {
+      setError(e.message)
+    }
+  }
 
   async function handleFile(file) {
     if (!file) return
@@ -81,6 +96,13 @@ export default function Dropzone() {
         Re-importing is safe — existing transactions stay as they are, only new
         rows are added.
       </p>
+
+      <button
+        onClick={handleReset}
+        className="mt-1 block text-[10px] text-gray-600 hover:text-rose-400"
+      >
+        Reset all data
+      </button>
 
       {error && <p className="mt-2 text-[11px] text-rose-400">{error}</p>}
 

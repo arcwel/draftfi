@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
-from app.api import budget, imports, llm_status, simulation, transactions
+from app.api import budget, data, imports, llm_status, simulation, transactions
 from app.config import get_settings
 from app.db.connection import init_db
 
@@ -63,6 +63,7 @@ def create_app() -> FastAPI:
     app.include_router(llm_status.router)
     app.include_router(simulation.router)
     app.include_router(budget.router)
+    app.include_router(data.router)
 
     @app.get("/health", tags=["meta"])
     def health() -> dict:

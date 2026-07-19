@@ -10,20 +10,22 @@ from __future__ import annotations
 import json
 import sqlite3
 
-# Sensible starter assumptions for the Base Plan so a fresh install renders a
-# meaningful simulation before any CSV is imported. monthly_inflow/outflow stay
-# null so they derive from historical transactions once data exists.
+# The Base Plan starts empty: no cash, no assets, no debt. Net worth begins at
+# $0 and the forecasts stay flat until the user imports transactions or enters
+# their own numbers. monthly_inflow/outflow stay null so they derive from
+# imported history until manually overridden. Only chart horizons and growth
+# rates carry non-zero defaults (they're display settings, not "your data").
 BASE_PLAN_PARAMETERS: dict = {
-    "starting_cash": 25000,
+    "starting_cash": 0,
     "monthly_inflow": None,
     "monthly_outflow": None,
     "income_adjustment_pct": 0,
-    "safety_floor": 5000,
+    "safety_floor": 0,
     "runway_months": 36,
     "macro_years": 10,
     "annual_return_pct": 6,
     "annual_debt_rate_pct": 5,
-    "starting_assets": 50000,
+    "starting_assets": 0,
     "starting_debt": 0,
 }
 

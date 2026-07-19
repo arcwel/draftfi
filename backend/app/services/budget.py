@@ -82,6 +82,13 @@ def compute_budget(
             )
         )
 
+    # Manual overrides win: if the user typed a monthly income/spending, use it
+    # for the headline totals (per-category bars still come from transactions).
+    if params.monthly_inflow is not None:
+        total_income = params.monthly_inflow
+    if params.monthly_outflow is not None:
+        total_expense = params.monthly_outflow
+
     scenario = _scenario_impact(
         params, milestones, total_income, total_expense
     )

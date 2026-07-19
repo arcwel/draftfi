@@ -121,3 +121,12 @@ def test_empty_history_safe(conn):
     assert summary.months_observed == 1
     assert summary.categories == []
     assert summary.total_monthly_net == 0.0
+
+
+def test_manual_income_spending_override_totals(conn):
+    # No transactions at all — user typed their numbers instead.
+    params = SimulationParameters(monthly_inflow=5000, monthly_outflow=3200)
+    summary = budget.compute_budget(conn, params, [])
+    assert summary.total_monthly_income == 5000.0
+    assert summary.total_monthly_expense == 3200.0
+    assert summary.total_monthly_net == 1800.0

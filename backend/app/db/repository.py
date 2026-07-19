@@ -276,6 +276,25 @@ def delete_branch(conn: sqlite3.Connection, branch_id: int) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Reset (clear the user's financial data back to an empty slate)
+# --------------------------------------------------------------------------- #
+def reset_financial_data(conn: sqlite3.Connection, base_parameters: dict) -> None:
+    """Wipe transactions, cache, budgets, and sandbox branches; reset the base.
+
+    Keeps categories (names/colors) and app settings (LLM provider + keys).
+    The Base Plan is reset to the supplied empty parameters with no milestones.
+    """
+    conn.execute("DELETE FROM transactions")
+    conn.execute("DELETE FROM merchant_llm_cache")
+    conn.execute("DELETE FROM branches WHERE is_base = 0")
+    conn.execute("UPDATE categories SET monthly_budget = NULL")
+    conn.execute(
+        "UPDATE branches SET parameters = ?, milestones = '[]' WHERE is_base = 1",
+        (json.dumps(base_parameters),),
+    )
+
+
+# --------------------------------------------------------------------------- #
 # App settings (local key-value store — LLM provider config + API keys)
 # --------------------------------------------------------------------------- #
 def get_setting(conn: sqlite3.Connection, key: str) -> str | None:

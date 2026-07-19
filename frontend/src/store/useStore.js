@@ -153,11 +153,12 @@ export const useStore = create((set, get) => ({
   // 'idle' | 'saving' | 'saved' — surfaced in the branch manager.
   branchSaveState: 'idle',
 
-  // Persist edits to the active branch (base is immutable — skip it).
+  // Persist edits to the active plan. The Base Plan is editable too — it holds
+  // your real baseline (income, spending, assets); only deletion is blocked.
   async persistActiveBranch() {
     const { activeBranchId, branches, parameters, milestones } = get()
     const active = branches.find((b) => b.id === activeBranchId)
-    if (!active || active.is_base) {
+    if (!active) {
       set({ branchSaveState: 'idle' })
       return
     }
@@ -258,6 +259,20 @@ export const useStore = create((set, get) => ({
   async overrideCategory(txId, categoryId) {
     await api.overrideCategory(txId, categoryId)
     await get().loadTransactions()
+    await get().recompute()
+  },
+
+  // Wipe all financial data back to an empty slate (keeps categories + LLM keys).
+  async resetAll() {
+    await api.resetData()
+    const base = await api.branches()
+    const baseId = base.find((b) => b.is_base)?.id ?? null
+    set({
+      activeBranchId: baseId,
+      overlay: false,
+      importSummary: null,
+    })
+    await Promise.all([get().loadBranches(), get().loadTransactions()])
     await get().recompute()
   },
 }))
