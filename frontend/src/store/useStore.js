@@ -36,6 +36,8 @@ export const useStore = create((set, get) => ({
   series: null, // single simulation result
   compare: null, // { base, branch } when overlay is on
   budget: null, // BudgetSummary: monthly spending + scenario impact
+  trends: null, // TrendsSummary: month-over-month cash flow + category series
+  budgetMonth: null, // null = all-time average; else "YYYY-MM"
   importing: false,
   importSummary: null,
   importProgress: null, // { processed, total } while an import runs
@@ -266,16 +268,25 @@ export const useStore = create((set, get) => ({
   },
 
   async loadBudget() {
-    const { parameters, milestones } = get()
+    const { parameters, milestones, budgetMonth } = get()
     try {
-      set({ budget: await api.budget(parameters, milestones) })
+      const [budget, trends] = await Promise.all([
+        api.budget(parameters, milestones, budgetMonth),
+        api.trends(),
+      ])
+      set({ budget, trends })
     } catch {
       /* non-fatal */
     }
   },
 
-  async setCategoryBudget(categoryId, monthlyBudget) {
-    await api.setCategoryBudget(categoryId, monthlyBudget)
+  setBudgetMonth(month) {
+    set({ budgetMonth: month })
+    get().loadBudget()
+  },
+
+  async setCategoryBudget(categoryId, monthlyBudget, rollover) {
+    await api.setCategoryBudget(categoryId, monthlyBudget, rollover)
     await Promise.all([get().loadCategories(), get().loadBudget()])
   },
 

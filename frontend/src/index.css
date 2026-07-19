@@ -16,6 +16,32 @@ body {
     Helvetica, Arial, sans-serif;
 }
 
+/* Dark, rounded scrollbars that blend into the app's palette. */
+* {
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: #334155 transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* Range slider styling for the income adjustment control. */
 input[type='range'] {
   -webkit-appearance: none;

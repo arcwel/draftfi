@@ -115,6 +115,13 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         CREATE INDEX IF NOT EXISTS idx_tx_parent ON transactions(parent_tx_id);
         """,
     ),
+    (
+        6,
+        "budget rollover: carry unspent budget to the next month",
+        """
+        ALTER TABLE categories ADD COLUMN budget_rollover INTEGER NOT NULL DEFAULT 0;
+        """,
+    ),
 ]
 
 # Default budget categories with visualization colors (Tailwind-ish hexes).

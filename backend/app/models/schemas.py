@@ -243,6 +243,10 @@ class BudgetCategory(BaseModel):
     monthly_budget: float | None = None
     over_budget: bool = False
     budget_used_pct: float | None = None
+    rollover: bool = False
+    # Populated only in the single-month view when rollover is on.
+    carried_over: float | None = None
+    effective_budget: float | None = None
 
 
 class MilestoneImpact(BaseModel):
@@ -276,15 +280,49 @@ class BudgetSummary(BaseModel):
     total_budget_target: float          # sum of category targets that are set
     budget_target_set: bool
     scenario: ScenarioBudgetImpact
+    # None = all-time average view; else the specific YYYY-MM being shown.
+    month: str | None = None
+    available_months: list[str] = Field(default_factory=list)
 
 
 class BudgetRequest(BaseModel):
     parameters: SimulationParameters = Field(default_factory=SimulationParameters)
     milestones: list[Milestone] = Field(default_factory=list)
+    month: str | None = None  # YYYY-MM for a single month, else averaged
 
 
 class BudgetOverride(BaseModel):
     monthly_budget: float | None = None
+    rollover: bool | None = None
+
+
+# --------------------------------------------------------------------------- #
+# Trends (month-over-month)
+# --------------------------------------------------------------------------- #
+class CashflowPoint(BaseModel):
+    month: str
+    income: float
+    expense: float
+    net: float
+
+
+class CategorySeriesPoint(BaseModel):
+    month: str
+    amount: float  # positive magnitude that month
+
+
+class CategoryTrend(BaseModel):
+    category_id: int | None
+    name: str
+    color: str
+    is_income: bool
+    series: list[CategorySeriesPoint]
+
+
+class TrendsSummary(BaseModel):
+    months: list[str]
+    cashflow: list[CashflowPoint]
+    categories: list[CategoryTrend]
 
 
 # --------------------------------------------------------------------------- #

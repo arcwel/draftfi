@@ -19,9 +19,13 @@ from app.db import repository as repo
 from app.models.schemas import (
     BudgetCategory,
     BudgetSummary,
+    CashflowPoint,
+    CategorySeriesPoint,
+    CategoryTrend,
     MilestoneImpact,
     ScenarioBudgetImpact,
     SimulationParameters,
+    TrendsSummary,
 )
 from app.models.schemas import Milestone as MilestoneModel
 
@@ -33,13 +37,40 @@ def _is_income(name: str, total: float) -> bool:
     return name.strip().lower() in INCOME_CATEGORY_NAMES or total > 0
 
 
+def _carried_over(
+    conn: sqlite3.Connection, category_id: int, budget: float, upto_month: str
+) -> float:
+    """Unspent budget accumulated from months strictly before ``upto_month``.
+
+    Only positive surplus carries; an over-spent month does not create debt.
+    """
+    rows = conn.execute(
+        "SELECT substr(date,1,7) AS ym, SUM(amount) AS total FROM transactions "
+        "WHERE is_split_parent = 0 AND category_id = ? AND substr(date,1,7) < ? "
+        "GROUP BY ym",
+        (category_id, upto_month),
+    ).fetchall()
+    carried = 0.0
+    for r in rows:
+        spent = abs(float(r["total"]))
+        carried += max(0.0, budget - spent)
+    return carried
+
+
 def compute_budget(
     conn: sqlite3.Connection,
     params: SimulationParameters,
     milestones: list[MilestoneModel],
+    month: str | None = None,
 ) -> BudgetSummary:
-    months = repo.months_observed(conn)
-    rows = repo.category_breakdown(conn)
+    """Monthly budget: all-time average, or a single YYYY-MM month when given."""
+    available = repo.observed_months(conn)
+    if month:
+        rows = repo.category_breakdown_for_month(conn, month)
+        divisor = 1  # a specific month is already a monthly figure
+    else:
+        rows = repo.category_breakdown(conn)
+        divisor = repo.months_observed(conn)
 
     categories: list[BudgetCategory] = []
     total_income = 0.0
@@ -51,21 +82,34 @@ def compute_budget(
         total = float(r["total"])
         income = _is_income(r["category_name"] or "", total)
         # Monthly magnitude, always presented as a positive number.
-        monthly = abs(total) / months
+        monthly = abs(total) / divisor
         if income:
             total_income += monthly
         else:
             total_expense += monthly
 
         target = r["monthly_budget"]
+        has_rollover_col = "budget_rollover" in r.keys()
+        rollover = bool(r["budget_rollover"]) if has_rollover_col else False
         over = False
         used_pct: float | None = None
+        carried: float | None = None
+        effective: float | None = None
         if target is not None:
             any_target = True
             total_budget_target += float(target)
-            if target > 0:
-                used_pct = round(monthly / float(target) * 100.0, 1)
-                over = monthly > float(target)
+            effective_budget = float(target)
+            # Rollover only applies when viewing a specific month.
+            if rollover and month and r["category_id"] is not None:
+                carried = round(
+                    _carried_over(conn, int(r["category_id"]), float(target), month),
+                    2,
+                )
+                effective_budget = float(target) + carried
+                effective = round(effective_budget, 2)
+            if effective_budget > 0:
+                used_pct = round(monthly / effective_budget * 100.0, 1)
+                over = monthly > effective_budget
 
         categories.append(
             BudgetCategory(
@@ -79,6 +123,9 @@ def compute_budget(
                 monthly_budget=target,
                 over_budget=over,
                 budget_used_pct=used_pct,
+                rollover=rollover,
+                carried_over=carried,
+                effective_budget=effective,
             )
         )
 
@@ -94,7 +141,7 @@ def compute_budget(
     )
 
     return BudgetSummary(
-        months_observed=months,
+        months_observed=repo.months_observed(conn),
         categories=categories,
         total_monthly_income=round(total_income, 2),
         total_monthly_expense=round(total_expense, 2),
@@ -102,7 +149,62 @@ def compute_budget(
         total_budget_target=round(total_budget_target, 2),
         budget_target_set=any_target,
         scenario=scenario,
+        month=month,
+        available_months=available,
     )
+
+
+def compute_trends(conn: sqlite3.Connection) -> TrendsSummary:
+    """Month-over-month cash flow and per-category series for trend charts."""
+    months = repo.observed_months(conn)
+    rows = repo.monthly_series(conn)
+
+    # Aggregate per-month cash flow and per-category series.
+    cash: dict[str, dict[str, float]] = {
+        m: {"income": 0.0, "expense": 0.0} for m in months
+    }
+    cats: dict[int | None, dict] = {}
+    for r in rows:
+        ym = r["ym"]
+        total = float(r["total"])
+        income = _is_income(r["category_name"] or "", total)
+        magnitude = abs(total)
+        if ym in cash:
+            cash[ym]["income" if income else "expense"] += magnitude
+        cid = r["category_id"]
+        if cid not in cats:
+            cats[cid] = {
+                "category_id": cid,
+                "name": r["category_name"] or "Uncategorized",
+                "color": r["category_color"] or "#64748B",
+                "is_income": income,
+                "by_month": {},
+            }
+        cats[cid]["by_month"][ym] = round(magnitude, 2)
+
+    cashflow = [
+        CashflowPoint(
+            month=m,
+            income=round(cash[m]["income"], 2),
+            expense=round(cash[m]["expense"], 2),
+            net=round(cash[m]["income"] - cash[m]["expense"], 2),
+        )
+        for m in months
+    ]
+    categories = [
+        CategoryTrend(
+            category_id=c["category_id"],
+            name=c["name"],
+            color=c["color"],
+            is_income=c["is_income"],
+            series=[
+                CategorySeriesPoint(month=m, amount=c["by_month"].get(m, 0.0))
+                for m in months
+            ],
+        )
+        for c in cats.values()
+    ]
+    return TrendsSummary(months=months, cashflow=cashflow, categories=categories)
 
 
 def _scenario_impact(

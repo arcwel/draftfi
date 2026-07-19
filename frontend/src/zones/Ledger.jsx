@@ -70,14 +70,14 @@ export default function Ledger() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between px-4 py-2">
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center px-4 py-2">
         <h2 className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
           Categorization Ledger
           <span className="ml-2 normal-case text-gray-600">
             {total} transaction{total === 1 ? '' : 's'}
           </span>
         </h2>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-center gap-2">
           <button
             onClick={() => setManagingCats(true)}
             className="rounded-md border border-edge bg-panel px-2.5 py-1 text-xs text-gray-300 hover:border-sky-500 hover:text-sky-300"
@@ -97,6 +97,7 @@ export default function Ledger() {
             + Add
           </button>
         </div>
+        <div />
       </div>
 
       <div className="flex-1 overflow-y-auto">

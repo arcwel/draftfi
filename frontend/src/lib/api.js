@@ -140,12 +140,14 @@ export const api = {
       body: JSON.stringify({ parameters, milestones }),
     }),
 
-  budget: (parameters, milestones) =>
+  budget: (parameters, milestones, month) =>
     request('/budget', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ parameters, milestones }),
+      body: JSON.stringify({ parameters, milestones, month: month ?? null }),
     }),
+
+  trends: () => request('/budget/trends'),
 
   resetData: () => request('/reset', { method: 'POST' }),
 
@@ -153,11 +155,14 @@ export const api = {
 
   syncStatus: (jobId) => request(`/sync/status/${jobId}`),
 
-  setCategoryBudget: (categoryId, monthlyBudget) =>
+  setCategoryBudget: (categoryId, monthlyBudget, rollover) =>
     request(`/categories/${categoryId}/budget`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ monthly_budget: monthlyBudget }),
+      body: JSON.stringify({
+        monthly_budget: monthlyBudget,
+        ...(rollover !== undefined ? { rollover } : {}),
+      }),
     }),
 
   branches: () => request('/branches'),

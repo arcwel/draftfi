@@ -2,6 +2,7 @@ import { useStore } from '../store/useStore'
 import RunwayChart from '../components/RunwayChart'
 import MacroChart from '../components/MacroChart'
 import BudgetPanel from '../components/BudgetPanel'
+import CashflowChart from '../components/CashflowChart'
 
 const HORIZONS = [12, 24, 36, 48, 60, 72]
 
@@ -11,10 +12,19 @@ export default function Charts() {
   const compare = useStore((s) => s.compare)
   const runwayMonths = useStore((s) => s.parameters.runway_months)
   const setParam = useStore((s) => s.setParam)
+  const trends = useStore((s) => s.trends)
+  const budgetMonth = useStore((s) => s.budgetMonth)
+  const setBudgetMonth = useStore((s) => s.setBudgetMonth)
 
   return (
     <div className="space-y-3 p-4">
       <BudgetPanel />
+
+      <CashflowChart
+        trends={trends}
+        selectedMonth={budgetMonth}
+        onSelectMonth={setBudgetMonth}
+      />
 
       <div className="rounded-xl border border-edge bg-panel/60 p-3">
         <div className="mb-1 flex justify-end gap-1">

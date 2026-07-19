@@ -130,3 +130,89 @@ def test_manual_income_spending_override_totals(conn):
     assert summary.total_monthly_income == 5000.0
     assert summary.total_monthly_expense == 3200.0
     assert summary.total_monthly_net == 1800.0
+
+
+# --------------------------------------------------------------------------- #
+# D2 — specific-month view
+# --------------------------------------------------------------------------- #
+def test_specific_month_view_uses_that_months_actuals(conn):
+    _seed(
+        conn,
+        [
+            ("2026-01-05", "STORE", -100.0, "Groceries"),  # Jan: 100
+            ("2026-02-05", "STORE", -300.0, "Groceries"),  # Feb: 300
+        ],
+    )
+    avg = budget.compute_budget(conn, SimulationParameters(), [])
+    jan = budget.compute_budget(conn, SimulationParameters(), [], month="2026-01")
+    feb = budget.compute_budget(conn, SimulationParameters(), [], month="2026-02")
+
+    groc = lambda s: next(c for c in s.categories if c.name == "Groceries")  # noqa: E731
+    assert groc(avg).monthly_amount == 200.0  # (100+300)/2 months
+    assert groc(jan).monthly_amount == 100.0
+    assert groc(feb).monthly_amount == 300.0
+    assert avg.month is None
+    assert feb.month == "2026-02"
+    assert avg.available_months == ["2026-01", "2026-02"]
+
+
+# --------------------------------------------------------------------------- #
+# D4 — budget rollover
+# --------------------------------------------------------------------------- #
+def test_budget_rollover_carries_unspent(conn):
+    _seed(
+        conn,
+        [
+            ("2026-01-10", "GROC", -60.0, "Groceries"),   # Jan: spent 60 of 100
+            ("2026-02-10", "GROC", -130.0, "Groceries"),  # Feb: spent 130
+        ],
+    )
+    gid = repo.get_category_by_name(conn, "Groceries")["id"]
+    repo.set_category_budget(conn, gid, 100.0, rollover=True)
+
+    feb = budget.compute_budget(conn, SimulationParameters(), [], month="2026-02")
+    g = next(c for c in feb.categories if c.name == "Groceries")
+    # Jan left 40 unspent → Feb effective budget = 100 + 40 = 140.
+    assert g.carried_over == 40.0
+    assert g.effective_budget == 140.0
+    assert g.over_budget is False  # 130 < 140
+
+    # Without rollover, 130 > 100 → over budget.
+    repo.set_category_budget(conn, gid, 100.0, rollover=False)
+    feb2 = budget.compute_budget(conn, SimulationParameters(), [], month="2026-02")
+    g2 = next(c for c in feb2.categories if c.name == "Groceries")
+    assert g2.over_budget is True
+    assert g2.carried_over is None
+
+
+# --------------------------------------------------------------------------- #
+# D1/D3 — trends
+# --------------------------------------------------------------------------- #
+def test_trends_cashflow_and_series(conn):
+    _seed(
+        conn,
+        [
+            ("2026-01-01", "PAY", 4000.0, "Income"),
+            ("2026-01-15", "RENT", -1500.0, "Housing"),
+            ("2026-02-01", "PAY", 4200.0, "Income"),
+            ("2026-02-15", "RENT", -1500.0, "Housing"),
+            ("2026-02-20", "FOOD", -200.0, "Groceries"),
+        ],
+    )
+    trends = budget.compute_trends(conn)
+    assert trends.months == ["2026-01", "2026-02"]
+
+    jan = next(p for p in trends.cashflow if p.month == "2026-01")
+    feb = next(p for p in trends.cashflow if p.month == "2026-02")
+    assert jan.income == 4000.0 and jan.expense == 1500.0 and jan.net == 2500.0
+    assert feb.income == 4200.0 and feb.expense == 1700.0 and feb.net == 2500.0
+
+    housing = next(c for c in trends.categories if c.name == "Housing")
+    amounts = {p.month: p.amount for p in housing.series}
+    assert amounts == {"2026-01": 1500.0, "2026-02": 1500.0}
+    groceries = next(c for c in trends.categories if c.name == "Groceries")
+    # Groceries only appear in Feb → Jan filled with 0.
+    assert {p.month: p.amount for p in groceries.series} == {
+        "2026-01": 0.0,
+        "2026-02": 200.0,
+    }

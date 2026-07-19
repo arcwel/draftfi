@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useStore } from '../store/useStore'
+import Sparkline from './Sparkline'
 
 const money = (n) =>
   new Intl.NumberFormat('en-US', {
@@ -10,9 +11,20 @@ const money = (n) =>
 
 const signed = (n) => `${n >= 0 ? '+' : '−'}${money(Math.abs(n))}`
 
+const monthLabel = (ym) => {
+  const [y, m] = ym.split('-')
+  return new Date(Number(y), Number(m) - 1).toLocaleString('en-US', {
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
 // Zone: monthly budget by category + how the active scenario reshapes it.
 export default function BudgetPanel() {
   const budget = useStore((s) => s.budget)
+  const trends = useStore((s) => s.trends)
+  const budgetMonth = useStore((s) => s.budgetMonth)
+  const setBudgetMonth = useStore((s) => s.setBudgetMonth)
   const setCategoryBudget = useStore((s) => s.setCategoryBudget)
 
   if (!budget) {
@@ -30,16 +42,38 @@ export default function BudgetPanel() {
   const scenarioActive =
     s.income_adjustment_pct !== 0 || s.recurring_milestone_cost > 0 || s.one_time_cost > 0
 
+  // Per-category monthly series (for the row sparklines).
+  const seriesByCat = {}
+  for (const c of trends?.categories || []) {
+    seriesByCat[c.category_id] = c.series.map((p) => p.amount)
+  }
+  const months = budget.available_months || []
+
   return (
     <div className="rounded-xl border border-edge bg-panel/60 p-3">
-      <div className="mb-2 flex items-baseline justify-between">
+      <div className="mb-2 flex items-center justify-between">
         <h3 className="text-sm font-semibold text-white">
           Monthly Budget
           <span className="ml-2 text-[11px] font-normal text-gray-500">
-            from {budget.months_observed} month
-            {budget.months_observed === 1 ? '' : 's'} of history
+            {budgetMonth
+              ? monthLabel(budgetMonth)
+              : `avg of ${budget.months_observed} month${budget.months_observed === 1 ? '' : 's'}`}
           </span>
         </h3>
+        {months.length > 0 && (
+          <select
+            value={budgetMonth ?? ''}
+            onChange={(e) => setBudgetMonth(e.target.value || null)}
+            className="rounded-md border border-edge bg-ink px-2 py-1 text-[11px] text-gray-200 focus:border-sky-500 focus:outline-none"
+          >
+            <option value="">All months (avg)</option>
+            {months.map((m) => (
+              <option key={m} value={m}>
+                {monthLabel(m)}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       {/* Totals */}
@@ -117,7 +151,10 @@ export default function BudgetPanel() {
             key={c.category_id ?? c.name}
             cat={c}
             maxExpense={maxExpense}
-            onSetBudget={(amt) => setCategoryBudget(c.category_id, amt)}
+            series={seriesByCat[c.category_id]}
+            onSetBudget={(amt, rollover) =>
+              setCategoryBudget(c.category_id, amt, rollover)
+            }
           />
         ))}
       </div>
@@ -165,11 +202,12 @@ function Dot({ color }) {
   )
 }
 
-function CategoryRow({ cat, maxExpense, onSetBudget }) {
+function CategoryRow({ cat, maxExpense, series, onSetBudget }) {
   const [editing, setEditing] = useState(false)
   const hasBudget = cat.monthly_budget != null
-  // Bar fills relative to the budget target if set, else to the largest category.
-  const denom = hasBudget && cat.monthly_budget > 0 ? cat.monthly_budget : maxExpense
+  // Fill relative to the effective budget (incl. rollover) if set, else largest.
+  const budgetForBar = cat.effective_budget ?? cat.monthly_budget
+  const denom = hasBudget && budgetForBar > 0 ? budgetForBar : maxExpense
   const pct = Math.min(100, (cat.monthly_amount / denom) * 100)
   const barColor = cat.over_budget ? '#ef4444' : cat.color
 
@@ -179,11 +217,12 @@ function CategoryRow({ cat, maxExpense, onSetBudget }) {
         <span className="flex items-center gap-1.5 text-gray-200">
           <Dot color={cat.color} />
           {cat.name}
-          <span className="text-[10px] text-gray-600">
-            {cat.transactions} tx
-          </span>
+          <span className="text-[10px] text-gray-600">{cat.transactions} tx</span>
         </span>
         <span className="flex items-center gap-2">
+          {series && series.length > 1 && (
+            <Sparkline values={series} color={cat.color} />
+          )}
           <span className="font-medium text-gray-200">
             {money(cat.monthly_amount)}/mo
           </span>
@@ -195,7 +234,7 @@ function CategoryRow({ cat, maxExpense, onSetBudget }) {
               placeholder="budget"
               onBlur={(e) => {
                 const v = e.target.value.trim()
-                onSetBudget(v === '' ? null : Number(v))
+                onSetBudget(v === '' ? null : Number(v), cat.rollover)
                 setEditing(false)
               }}
               onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
@@ -216,6 +255,17 @@ function CategoryRow({ cat, maxExpense, onSetBudget }) {
               {hasBudget ? `budget ${money(cat.monthly_budget)}` : '+ budget'}
             </button>
           )}
+          {hasBudget && (
+            <button
+              onClick={() => onSetBudget(cat.monthly_budget, !cat.rollover)}
+              className={`rounded px-1 text-[10px] ${
+                cat.rollover ? 'text-sky-300' : 'text-gray-600 hover:text-gray-400'
+              }`}
+              title="Roll unspent budget into next month"
+            >
+              ↻
+            </button>
+          )}
         </span>
       </div>
       <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-ink">
@@ -225,9 +275,16 @@ function CategoryRow({ cat, maxExpense, onSetBudget }) {
         />
       </div>
       {hasBudget && cat.budget_used_pct != null && (
-        <div className="mt-0.5 text-right text-[10px] text-gray-500">
-          {cat.budget_used_pct}% of budget
-          {cat.over_budget && <span className="text-rose-400"> · over</span>}
+        <div className="mt-0.5 flex items-center justify-end gap-2 text-[10px] text-gray-500">
+          {cat.carried_over != null && cat.carried_over > 0 && (
+            <span className="text-sky-400">
+              +{money(cat.carried_over)} rolled over
+            </span>
+          )}
+          <span>
+            {cat.budget_used_pct}% of budget
+            {cat.over_budget && <span className="text-rose-400"> · over</span>}
+          </span>
         </div>
       )}
     </div>

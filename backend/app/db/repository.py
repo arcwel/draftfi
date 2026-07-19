@@ -402,12 +402,62 @@ def category_totals(conn: sqlite3.Connection) -> list[dict[str, Any]]:
 
 
 def set_category_budget(
-    conn: sqlite3.Connection, category_id: int, monthly_budget: float | None
+    conn: sqlite3.Connection,
+    category_id: int,
+    monthly_budget: float | None,
+    rollover: bool | None = None,
 ) -> None:
     """Set (or clear, with None) a category's monthly budget target."""
     conn.execute(
         "UPDATE categories SET monthly_budget = ? WHERE id = ?",
         (monthly_budget, category_id),
+    )
+    if rollover is not None:
+        conn.execute(
+            "UPDATE categories SET budget_rollover = ? WHERE id = ?",
+            (1 if rollover else 0, category_id),
+        )
+
+
+def observed_months(conn: sqlite3.Connection) -> list[str]:
+    """Sorted distinct YYYY-MM months present in the transaction history."""
+    rows = conn.execute(
+        "SELECT DISTINCT substr(date, 1, 7) AS ym FROM transactions "
+        "WHERE is_split_parent = 0 AND date IS NOT NULL ORDER BY ym"
+    ).fetchall()
+    return [r["ym"] for r in rows if r["ym"]]
+
+
+def monthly_series(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Per-month, per-category signed totals (split parents excluded)."""
+    return _rows(
+        conn.execute(
+            "SELECT substr(t.date, 1, 7) AS ym, c.id AS category_id, "
+            "c.name AS category_name, c.color AS category_color, "
+            "SUM(t.amount) AS total, COUNT(t.id) AS n "
+            "FROM transactions t LEFT JOIN categories c ON t.category_id = c.id "
+            "WHERE t.is_split_parent = 0 AND t.date IS NOT NULL "
+            "GROUP BY ym, t.category_id ORDER BY ym"
+        ).fetchall()
+    )
+
+
+def category_breakdown_for_month(
+    conn: sqlite3.Connection, month: str
+) -> list[dict[str, Any]]:
+    """Per-category totals for a single YYYY-MM month, with budget settings."""
+    return _rows(
+        conn.execute(
+            "SELECT c.id AS category_id, c.name AS category_name, "
+            "c.color AS category_color, c.monthly_budget AS monthly_budget, "
+            "c.budget_rollover AS budget_rollover, "
+            "COALESCE(SUM(t.amount), 0) AS total, COUNT(t.id) AS n "
+            "FROM categories c "
+            "JOIN transactions t ON t.category_id = c.id "
+            "WHERE t.is_split_parent = 0 AND substr(t.date, 1, 7) = ? "
+            "GROUP BY c.id ORDER BY SUM(t.amount) ASC",
+            (month,),
+        ).fetchall()
     )
 
 
@@ -429,6 +479,7 @@ def category_breakdown(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         conn.execute(
             "SELECT c.id AS category_id, c.name AS category_name, "
             "c.color AS category_color, c.monthly_budget AS monthly_budget, "
+            "c.budget_rollover AS budget_rollover, "
             "COALESCE(SUM(t.amount), 0) AS total, COUNT(t.id) AS n "
             "FROM categories c "
             "JOIN transactions t ON t.category_id = c.id "
