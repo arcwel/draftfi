@@ -75,6 +75,8 @@ export const api = {
 
   resetData: () => request('/reset', { method: 'POST' }),
 
+  sync: () => request('/sync', { method: 'POST' }),
+
   setCategoryBudget: (categoryId, monthlyBudget) =>
     request(`/categories/${categoryId}/budget`, {
       method: 'PATCH',

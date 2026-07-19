@@ -140,6 +140,33 @@ def update_transaction_category(
     )
 
 
+def list_uncategorized_transactions(
+    conn: sqlite3.Connection,
+) -> list[dict[str, Any]]:
+    """Transactions that never got a resolved category (e.g. imported offline)."""
+    return _rows(
+        conn.execute(
+            "SELECT * FROM transactions WHERE resolution = 'uncategorized' "
+            "OR resolution IS NULL"
+        ).fetchall()
+    )
+
+
+def apply_categorization(
+    conn: sqlite3.Connection,
+    tx_id: int,
+    category_id: int | None,
+    clean_merchant: str,
+    resolution: str,
+) -> None:
+    """Write a freshly-resolved categorization onto an existing transaction."""
+    conn.execute(
+        "UPDATE transactions SET category_id = ?, clean_merchant = ?, "
+        "resolution = ? WHERE id = ?",
+        (category_id, clean_merchant, resolution, tx_id),
+    )
+
+
 def apply_category_to_raw(
     conn: sqlite3.Connection, raw_description: str, category_id: int
 ) -> int:

@@ -8,8 +8,16 @@ from fastapi import APIRouter, Depends
 from app.db import repository as repo
 from app.db.connection import get_db
 from app.db.schema import BASE_PLAN_PARAMETERS
+from app.services import sync as sync_service
 
 router = APIRouter(tags=["data"])
+
+
+@router.post("/sync")
+async def sync(conn: sqlite3.Connection = Depends(get_db)) -> dict:
+    """Reprocess unresolved data (re-categorize 'Uncategorized' transactions)."""
+    result = await sync_service.resync(conn)
+    return result.to_dict()
 
 
 @router.post("/reset")

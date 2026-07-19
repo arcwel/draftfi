@@ -4,6 +4,7 @@ import Sidebar from './zones/Sidebar'
 import SimulationStrip from './zones/SimulationStrip'
 import Charts from './zones/Charts'
 import Ledger from './zones/Ledger'
+import SyncButton from './components/SyncButton'
 import iconUrl from './assets/DraftFi_Icon.png'
 
 export default function App() {
@@ -34,9 +35,12 @@ export default function App() {
             local-first financial sandbox · BYO-LLM
           </span>
         </div>
-        <span className="text-[11px] text-gray-600">
-          all data stays on this machine
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="hidden text-[11px] text-gray-600 sm:inline">
+            all data stays on this machine
+          </span>
+          <SyncButton />
+        </div>
       </header>
 
       {/* Four-zone responsive workspace (PRD §4). */}

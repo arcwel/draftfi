@@ -38,6 +38,8 @@ export const useStore = create((set, get) => ({
   budget: null, // BudgetSummary: monthly spending + scenario impact
   importing: false,
   importSummary: null,
+  syncing: false,
+  syncResult: null, // { recategorized, still_uncategorized, ... } shown briefly
 
   // ---- bootstrapping ---- //
   async init() {
@@ -260,6 +262,39 @@ export const useStore = create((set, get) => ({
     await api.overrideCategory(txId, categoryId)
     await get().loadTransactions()
     await get().recompute()
+  },
+
+  // Process new information: re-categorize unresolved rows + refresh everything.
+  async sync() {
+    if (get().syncing) return
+    set({ syncing: true })
+    try {
+      const result = await get()._runSync()
+      set({ syncResult: result })
+      // Clear the result banner after a few seconds.
+      setTimeout(() => {
+        if (get().syncResult === result) set({ syncResult: null })
+      }, 6000)
+    } finally {
+      set({ syncing: false })
+    }
+  },
+
+  async _runSync() {
+    let result = null
+    try {
+      result = await api.sync()
+    } catch {
+      /* sync endpoint failed; still refresh the view below */
+    }
+    await Promise.all([
+      get().pollLlm(),
+      get().loadCategories(),
+      get().loadTransactions(),
+      get().loadBranches(),
+    ])
+    await get().recompute()
+    return result
   },
 
   // Wipe all financial data back to an empty slate (keeps categories + LLM keys).
