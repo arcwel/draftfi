@@ -90,10 +90,22 @@ def test_passcode_is_hashed_not_stored_plaintext(client):
 # --------------------------------------------------------------------------- #
 def test_preferences_default_and_update(client):
     prefs = client.get("/preferences").json()
-    assert prefs == {"currency": "USD", "locale": "en-US"}
+    assert prefs == {"currency": "USD", "locale": "en-US", "text_scale": 0}
 
     updated = client.put("/preferences", json={"currency": "EUR", "locale": "de-DE"})
     assert updated.status_code == 200
-    assert updated.json() == {"currency": "EUR", "locale": "de-DE"}
+    assert updated.json()["currency"] == "EUR"
+    assert updated.json()["locale"] == "de-DE"
     # Persisted for the next read.
     assert client.get("/preferences").json()["currency"] == "EUR"
+
+
+def test_text_scale_persists_and_is_clamped(client):
+    assert client.put("/preferences", json={"text_scale": 6}).json()["text_scale"] == 6
+    assert client.get("/preferences").json()["text_scale"] == 6
+    # Out-of-range values are rejected by validation (0-10).
+    assert client.put("/preferences", json={"text_scale": 25}).status_code == 422
+    assert client.put("/preferences", json={"text_scale": -1}).status_code == 422
+    # Updating currency alone leaves the scale intact.
+    client.put("/preferences", json={"currency": "GBP"})
+    assert client.get("/preferences").json()["text_scale"] == 6

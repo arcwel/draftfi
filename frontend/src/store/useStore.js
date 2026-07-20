@@ -2,6 +2,14 @@ import { create } from 'zustand'
 import { api } from '../lib/api'
 import { setFormat } from '../lib/format'
 
+// Text-size setting: scale the root font size so every rem-based size in the UI
+// grows with it (index.css re-expresses the few fixed-px sizes in rem too).
+const BASE_FONT_PX = 16
+function applyTextScale(scale) {
+  const pt = Math.max(0, Math.min(10, Number(scale) || 0))
+  document.documentElement.style.fontSize = `${BASE_FONT_PX + pt}px`
+}
+
 const DEFAULT_PARAMS = {
   starting_cash: 25000,
   monthly_inflow: null, // null => backend derives from history
@@ -76,12 +84,13 @@ export const useStore = create((set, get) => ({
     if (!security.locked) await get().init()
   },
 
-  // G4: load and apply the saved currency/locale (runs post-unlock via init).
+  // G4: load and apply the saved currency/locale + text size (post-unlock).
   async loadPreferences() {
     try {
       const prefs = await api.preferences()
       if (prefs && prefs.currency && prefs.locale) {
         setFormat(prefs)
+        applyTextScale(prefs.text_scale)
         set({ preferences: prefs })
       }
     } catch {
@@ -108,7 +117,14 @@ export const useStore = create((set, get) => ({
   async updatePreferences(patch) {
     const prefs = await api.setPreferences(patch)
     setFormat(prefs)
+    applyTextScale(prefs.text_scale)
     set({ preferences: prefs })
+  },
+
+  // Live preview while dragging the text-size slider; the value is persisted
+  // once on release rather than on every step.
+  previewTextScale(scale) {
+    applyTextScale(scale)
   },
 
   // G2: passcode management (from the settings panel).

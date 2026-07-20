@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { api } from '../lib/api'
 
@@ -25,6 +25,22 @@ export default function LLMConfigPanel() {
   const [models, setModels] = useState([])
   const [loadingModels, setLoadingModels] = useState(false)
   const [modelsError, setModelsError] = useState(null)
+  // In-app dropdown (a native <datalist> popup renders outside the desktop
+  // window in the packaged webview, so we draw the list ourselves).
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const pickerRef = useRef(null)
+
+  // Close the model dropdown when clicking anywhere outside it.
+  useEffect(() => {
+    if (!pickerOpen) return undefined
+    const onPointerDown = (e) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target)) {
+        setPickerOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    return () => document.removeEventListener('mousedown', onPointerDown)
+  }, [pickerOpen])
 
   const specs = config?.providers ?? []
   const active = specs.find((p) => p.id === provider)
@@ -52,6 +68,7 @@ export default function LLMConfigPanel() {
     setTestResult(null)
     setModels([])
     setModelsError(null)
+    setPickerOpen(false)
   }, [provider, config])
 
   if (!config) {
@@ -96,6 +113,8 @@ export default function LLMConfigPanel() {
     try {
       const res = await api.llmModels(draftConfig())
       setModels(res.models)
+      // Drop the list open right away so the models are visible in-app.
+      setPickerOpen(res.models.length > 0)
       if (res.models.length === 0) setModelsError(res.detail || 'No models found')
     } catch (e) {
       setModelsError(e.message)
@@ -145,8 +164,8 @@ export default function LLMConfigPanel() {
         </select>
       </label>
 
-      {/* Model — free text with a live picker (A2). */}
-      <label className="block">
+      {/* Model — free text plus an in-app dropdown of the provider's models. */}
+      <div className="block">
         <div className="flex items-center justify-between">
           <span className="text-[11px] text-gray-500">Model</span>
           <button
@@ -158,18 +177,48 @@ export default function LLMConfigPanel() {
             {loadingModels ? 'Loading…' : '↻ Load models'}
           </button>
         </div>
-        <input
-          className={inputCls}
-          value={model}
-          list="llm-model-options"
-          placeholder={active?.model_hint}
-          onChange={(e) => setModel(e.target.value)}
-        />
-        <datalist id="llm-model-options">
-          {models.map((m) => (
-            <option key={m} value={m} />
-          ))}
-        </datalist>
+
+        <div className="relative" ref={pickerRef}>
+          <input
+            className={`${inputCls} ${models.length > 0 ? 'pr-7' : ''}`}
+            value={model}
+            placeholder={active?.model_hint}
+            onChange={(e) => setModel(e.target.value)}
+          />
+          {models.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setPickerOpen((v) => !v)}
+              title="Choose from available models"
+              aria-label="Choose from available models"
+              className="absolute inset-y-0 right-0 flex items-center px-2 text-xs text-gray-400 hover:text-sky-300"
+            >
+              {pickerOpen ? '▴' : '▾'}
+            </button>
+          )}
+
+          {pickerOpen && models.length > 0 && (
+            <ul className="absolute left-0 right-0 z-40 mt-1 max-h-48 overflow-y-auto rounded-md border border-edge bg-panel py-1 shadow-xl">
+              {models.map((m) => (
+                <li key={m}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModel(m)
+                      setPickerOpen(false)
+                    }}
+                    className={`block w-full truncate px-2 py-1 text-left text-[11px] hover:bg-sky-950/60 ${
+                      m === model ? 'text-sky-300' : 'text-gray-200'
+                    }`}
+                  >
+                    {m}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
         {models.length > 0 && (
           <span className="mt-0.5 block text-[10px] text-gray-600">
             {models.length} models available — type or pick from the list
@@ -178,7 +227,7 @@ export default function LLMConfigPanel() {
         {modelsError && (
           <span className="mt-0.5 block text-[10px] text-amber-400">{modelsError}</span>
         )}
-      </label>
+      </div>
 
       {/* Base URL — only meaningful for local providers */}
       {active?.is_local && (

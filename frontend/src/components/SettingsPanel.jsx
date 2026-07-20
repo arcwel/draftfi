@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useStore } from '../store/useStore'
 
 // Currency + matching locale presets (G4). Pairing them avoids invalid combos
@@ -24,10 +24,18 @@ export default function SettingsPanel() {
   const setPasscode = useStore((s) => s.setPasscode)
   const removePasscode = useStore((s) => s.removePasscode)
 
+  const previewTextScale = useStore((s) => s.previewTextScale)
+
   const [pcNew, setPcNew] = useState('')
   const [pcCurrent, setPcCurrent] = useState('')
   const [pcError, setPcError] = useState(null)
   const [pcFlash, setPcFlash] = useState(null)
+  // Local slider value so dragging previews instantly; persisted on release.
+  const [scale, setScale] = useState(prefs.text_scale ?? 0)
+
+  useEffect(() => {
+    setScale(prefs.text_scale ?? 0)
+  }, [prefs.text_scale])
 
   async function onCurrency(e) {
     const p = PRESETS.find((x) => x.currency === e.target.value)
@@ -83,6 +91,35 @@ export default function SettingsPanel() {
         <span className="mt-0.5 block text-[10px] text-gray-600">
           Formats every amount as {prefs.currency} · {prefs.locale}
         </span>
+      </label>
+
+      {/* Text size: scales the whole UI up to +10pt for readability. */}
+      <label className="block">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-gray-500">Text size</span>
+          <span className="text-[10px] text-gray-400">
+            {scale > 0 ? `+${scale} pt` : 'Default'}
+          </span>
+        </div>
+        <input
+          type="range"
+          min="0"
+          max="10"
+          step="1"
+          value={scale}
+          onChange={(e) => {
+            const v = Number(e.target.value)
+            setScale(v)
+            previewTextScale(v) // instant feedback while dragging
+          }}
+          onPointerUp={() => updatePreferences({ text_scale: scale })}
+          onKeyUp={() => updatePreferences({ text_scale: scale })}
+          className="mt-1 w-full"
+        />
+        <div className="flex justify-between text-[10px] text-gray-600">
+          <span>Default</span>
+          <span>+10 pt</span>
+        </div>
       </label>
 
       {/* G2: passcode */}

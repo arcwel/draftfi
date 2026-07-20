@@ -16,6 +16,20 @@ body {
     Helvetica, Arial, sans-serif;
 }
 
+/* Text-size setting: the store bumps the root font-size (16px + 0-10pt), and
+   every rem-based Tailwind size follows. The UI also uses a few fixed-pixel
+   sizes, so re-express those in rem here to keep the whole app scaling
+   uniformly instead of leaving half the labels stuck at their original size. */
+.text-\[9px\] {
+  font-size: 0.5625rem; /* 9/16 */
+}
+.text-\[10px\] {
+  font-size: 0.625rem; /* 10/16 */
+}
+.text-\[11px\] {
+  font-size: 0.6875rem; /* 11/16 */
+}
+
 /* Dark, rounded scrollbars that blend into the app's palette. */
 * {
   scrollbar-width: thin; /* Firefox */

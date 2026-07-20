@@ -140,24 +140,47 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         );
         """,
     ),
+    (
+        8,
+        "distinct per-category colours (Income green, Fees red)",
+        """
+        -- Only recolour categories still on their old default, so a colour the
+        -- user picked in the category manager is never overwritten.
+        UPDATE categories SET color = '#84CC16'
+            WHERE name = 'Groceries' AND color = '#10B981';
+        UPDATE categories SET color = '#D946EF'
+            WHERE name = 'Entertainment' AND color = '#EC4899';
+        UPDATE categories SET color = '#EC4899'
+            WHERE name = 'Healthcare' AND color = '#EF4444';
+        UPDATE categories SET color = '#06B6D4'
+            WHERE name = 'Travel' AND color = '#14B8A6';
+        UPDATE categories SET color = '#14B8A6'
+            WHERE name = 'Savings & Investments' AND color = '#84CC16';
+        UPDATE categories SET color = '#EF4444'
+            WHERE name = 'Fees & Interest' AND color = '#A855F7';
+        """,
+    ),
 ]
 
 # Default budget categories with visualization colors (Tailwind-ish hexes).
+# One distinct hue per category, spread around the colour wheel so no two read
+# alike in a chart legend or the ledger. Two are semantically fixed: Income is
+# green and Fees & Interest is red.
 DEFAULT_CATEGORIES: list[tuple[str, str]] = [
-    ("Income", "#22C55E"),
-    ("Housing", "#3B82F6"),
-    ("Groceries", "#10B981"),
-    ("Dining", "#F59E0B"),
-    ("Transportation", "#6366F1"),
-    ("Utilities", "#0EA5E9"),
-    ("Software Subscriptions", "#8B5CF6"),
-    ("Entertainment", "#EC4899"),
-    ("Healthcare", "#EF4444"),
-    ("Shopping", "#F97316"),
-    ("Travel", "#14B8A6"),
-    ("Savings & Investments", "#84CC16"),
-    ("Fees & Interest", "#A855F7"),
-    ("Uncategorized", "#64748B"),
+    ("Income", "#22C55E"),                   # green   (fixed)
+    ("Groceries", "#84CC16"),                # lime
+    ("Dining", "#F59E0B"),                   # amber
+    ("Shopping", "#F97316"),                 # orange
+    ("Fees & Interest", "#EF4444"),          # red     (fixed)
+    ("Healthcare", "#EC4899"),               # pink
+    ("Entertainment", "#D946EF"),            # fuchsia
+    ("Software Subscriptions", "#8B5CF6"),   # violet
+    ("Transportation", "#6366F1"),           # indigo
+    ("Housing", "#3B82F6"),                  # blue
+    ("Utilities", "#0EA5E9"),                # sky
+    ("Travel", "#06B6D4"),                   # cyan
+    ("Savings & Investments", "#14B8A6"),    # teal
+    ("Uncategorized", "#64748B"),            # slate
 ]
 
 

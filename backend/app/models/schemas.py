@@ -494,8 +494,10 @@ class UnlockResult(BaseModel):
 class Preferences(BaseModel):
     currency: str
     locale: str
+    text_scale: int = 0          # points added to the base font size (0-10)
 
 
 class PreferencesUpdate(BaseModel):
     currency: str | None = Field(default=None, max_length=8)
     locale: str | None = Field(default=None, max_length=16)
+    text_scale: int | None = Field(default=None, ge=0, le=10)

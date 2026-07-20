@@ -115,3 +115,28 @@ def test_migrations_idempotent_after_interruption():
     versions = [r[0] for r in conn.execute("SELECT version FROM schema_migrations")]
     assert max(versions) == max(v for v, _, _ in schema.MIGRATIONS)
     conn.close()
+
+
+def test_category_colors_are_distinct_with_fixed_income_and_fees(conn):
+    """Every default category gets its own colour; Income green, Fees red."""
+    rows = {c["name"]: c["color"] for c in repo.list_categories(conn)}
+    assert rows["Income"] == "#22C55E"          # green
+    assert rows["Fees & Interest"] == "#EF4444"  # red
+    colors = [c for c in rows.values()]
+    assert len(colors) == len(set(colors)), "category colours must be unique"
+
+
+def test_migration_recolors_old_defaults_but_keeps_custom(conn):
+    """Migration 8 recolours stock categories without clobbering user picks."""
+    from app.db import schema
+
+    # Simulate a pre-migration-8 database: old colours + one user customisation.
+    conn.execute("UPDATE categories SET color='#A855F7' WHERE name='Fees & Interest'")
+    conn.execute("UPDATE categories SET color='#123456' WHERE name='Travel'")  # custom
+    conn.execute("DELETE FROM schema_migrations WHERE version >= 8")
+
+    schema.apply_migrations(conn)
+
+    rows = {c["name"]: c["color"] for c in repo.list_categories(conn)}
+    assert rows["Fees & Interest"] == "#EF4444"  # stock colour was upgraded
+    assert rows["Travel"] == "#123456"           # user's choice preserved

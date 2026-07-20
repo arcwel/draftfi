@@ -160,10 +160,11 @@ export default function Ledger() {
                       ))}
                     </span>
                   </td>
+                  {/* The amount carries its category's colour, so Income reads
+                      green, Fees & Interest red, and so on down the ledger. */}
                   <td
-                    className={`whitespace-nowrap px-2 py-1.5 text-right font-medium ${
-                      t.amount >= 0 ? 'text-emerald-400' : 'text-gray-300'
-                    }`}
+                    className="whitespace-nowrap px-2 py-1.5 text-right font-medium"
+                    style={{ color: t.category_color || '#94a3b8' }}
                   >
                     {amount(t.amount)}
                   </td>
