@@ -226,18 +226,3 @@ def test_checkpoint_values_reads_runway_and_macro():
     cash72, net72 = simulation.checkpoint_values(series, 72)
     assert cash72 is None
     assert net72 is not None
-
-
-# --------------------------------------------------------------------------- #
-# E5 — goal evaluation
-# --------------------------------------------------------------------------- #
-def test_goal_on_and_off_track():
-    params = SimulationParameters(
-        starting_cash=1000, monthly_inflow=100, monthly_outflow=0, runway_months=36
-    )
-    series = simulation.run_simulation(params, [])
-    # Cash at month 12 = 2200. Target 2000 -> on track; 5000 -> off track.
-    proj, on = simulation.evaluate_goal(series, "cash", 2000, 12)
-    assert proj == 2200 and on is True
-    proj2, on2 = simulation.evaluate_goal(series, "cash", 5000, 12)
-    assert proj2 == 2200 and on2 is False

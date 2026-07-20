@@ -200,25 +200,6 @@ def checkpoint_values(
     return cash, net_worth
 
 
-def evaluate_goal(
-    series: SimulationSeries, kind: str, target_amount: float, target_month: int
-) -> tuple[float | None, bool]:
-    """Return (projected value, on_track) for a goal against a scenario series.
-
-    ``on_track`` means the scenario reaches at least the target by the target
-    month. Cash goals read the runway; net-worth goals read the macro series at
-    the nearest sampled year at or before the target month.
-    """
-    if kind == "cash":
-        idx = min(target_month, len(series.runway) - 1)
-        projected: float | None = series.runway[idx].cash if series.runway else None
-    else:  # net_worth
-        year = min(target_month // 12, len(series.macro) - 1)
-        projected = series.macro[year].net_worth if series.macro else None
-    on_track = projected is not None and projected >= target_amount
-    return projected, on_track
-
-
 def resolve_parameters(
     conn: sqlite3.Connection, params: SimulationParameters
 ) -> SimulationParameters:

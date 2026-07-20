@@ -180,15 +180,6 @@ def get_transaction(conn: sqlite3.Connection, tx_id: int) -> dict[str, Any] | No
     )
 
 
-def update_transaction_category(
-    conn: sqlite3.Connection, tx_id: int, category_id: int, resolution: str = "override"
-) -> None:
-    conn.execute(
-        "UPDATE transactions SET category_id = ?, resolution = ? WHERE id = ?",
-        (category_id, resolution, tx_id),
-    )
-
-
 TX_EDITABLE_FIELDS = {
     "date",
     "raw_description",
@@ -272,19 +263,6 @@ def unsplit_transaction(conn: sqlite3.Connection, parent_id: int) -> int:
         "UPDATE transactions SET is_split_parent = 0 WHERE id = ?", (parent_id,)
     )
     return cur.rowcount
-
-
-def list_split_children(
-    conn: sqlite3.Connection, parent_id: int
-) -> list[dict[str, Any]]:
-    return _rows(
-        conn.execute(
-            "SELECT t.*, c.name AS category_name, c.color AS category_color "
-            "FROM transactions t LEFT JOIN categories c ON t.category_id = c.id "
-            "WHERE t.parent_tx_id = ? ORDER BY t.id",
-            (parent_id,),
-        ).fetchall()
-    )
 
 
 # --------------------------------------------------------------------------- #
@@ -383,22 +361,6 @@ def apply_category_to_raw(
         (category_id, raw_description),
     )
     return cur.rowcount
-
-
-def category_totals(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    """Aggregate signed amounts by category — feeds simulation baselines.
-
-    Split parents are excluded: their children carry the amounts.
-    """
-    return _rows(
-        conn.execute(
-            "SELECT c.id AS category_id, c.name AS category_name, "
-            "SUM(t.amount) AS total, COUNT(*) AS n "
-            "FROM transactions t LEFT JOIN categories c ON t.category_id = c.id "
-            "WHERE t.is_split_parent = 0 "
-            "GROUP BY t.category_id"
-        ).fetchall()
-    )
 
 
 def set_category_budget(

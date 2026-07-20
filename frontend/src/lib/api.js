@@ -22,7 +22,6 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-  health: () => request('/health'),
   llmStatus: () => request('/llm/status'),
 
   llmConfig: () => request('/llm/config'),

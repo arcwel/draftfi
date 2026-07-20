@@ -20,16 +20,3 @@ export function ResolutionBadge({ resolution }) {
     </span>
   )
 }
-
-export function CategoryChip({ name, color }) {
-  if (!name) return <span className="text-gray-600">—</span>
-  return (
-    <span className="inline-flex items-center gap-1.5 text-xs">
-      <span
-        className="inline-block h-2 w-2 rounded-full"
-        style={{ background: color || '#64748b' }}
-      />
-      {name}
-    </span>
-  )
-}

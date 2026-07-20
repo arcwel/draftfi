@@ -11,6 +11,7 @@ const DEFAULT_PARAMS = {
   macro_years: 10,
   annual_return_pct: 6,
   annual_debt_rate_pct: 5,
+  annual_inflation_pct: 0,
   starting_assets: 50000,
   starting_debt: 0,
 }

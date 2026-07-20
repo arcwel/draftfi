@@ -54,16 +54,6 @@ class TransactionPage(BaseModel):
     offset: int
 
 
-class ImportResult(BaseModel):
-    imported: int
-    skipped_duplicates: int
-    skipped_invalid: int
-    cache_hits: int
-    llm_cleaned: int
-    uncategorized: int
-    errors: list[str] = Field(default_factory=list)
-
-
 class CategoryOverride(BaseModel):
     category_id: int
 
