@@ -25,6 +25,8 @@ from app.api import (
 )
 from app.config import get_settings
 from app.db.connection import init_db
+from app.models.schemas import UpdateInfo
+from app.services import updates
 
 
 def _frontend_dir() -> Path | None:
@@ -83,6 +85,11 @@ def create_app() -> FastAPI:
     @app.get("/health", tags=["meta"])
     def health() -> dict:
         return {"status": "ok", "version": __version__}
+
+    @app.get("/update-check", response_model=UpdateInfo, tags=["meta"])
+    async def update_check() -> UpdateInfo:
+        """F1: is a newer desktop release available on GitHub?"""
+        return UpdateInfo(**await updates.check_for_update())
 
     # In the packaged desktop app, this same process serves the built React
     # frontend so everything runs from one local origin (no Vite, no proxy).

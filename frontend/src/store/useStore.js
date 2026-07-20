@@ -42,6 +42,8 @@ export const useStore = create((set, get) => ({
   goals: [], // E5: target net worth / cash records
   subscriptions: null, // A3: { items, total_monthly }
   insights: [], // A4: heuristic month-over-month insights
+  updateInfo: null, // F1: { current, latest, update_available, url }
+  updateDismissed: false, // F1: user closed the update banner this session
   budget: null, // BudgetSummary: monthly spending + scenario impact
   trends: null, // TrendsSummary: month-over-month cash flow + category series
   budgetMonth: null, // null = all-time average; else "YYYY-MM"
@@ -63,8 +65,22 @@ export const useStore = create((set, get) => ({
       get().pollLlm(),
       get().loadLlmConfig(),
       get().loadGoals(),
+      get().checkForUpdate(),
     ])
     await get().recompute()
+  },
+
+  // F1: fetch the latest release info once at launch (fails silently offline).
+  async checkForUpdate() {
+    try {
+      set({ updateInfo: await api.updateCheck() })
+    } catch {
+      /* offline / not packaged — no banner */
+    }
+  },
+
+  dismissUpdate() {
+    set({ updateDismissed: true })
   },
 
   async loadLlmConfig() {

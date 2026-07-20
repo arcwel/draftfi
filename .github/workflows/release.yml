@@ -1,8 +1,8 @@
 name: Build desktop apps
 
-# Builds self-contained macOS and Windows apps. Triggers on a version tag
-# (e.g. v0.1.0) and attaches the packaged apps to a GitHub Release. Can also be
-# run manually from the Actions tab.
+# Builds self-contained macOS, Windows, and Linux apps. Triggers on a version
+# tag (e.g. v0.1.0) and attaches the packaged apps to a GitHub Release. Can also
+# be run manually from the Actions tab.
 on:
   push:
     tags: ["v*"]
@@ -20,6 +20,8 @@ jobs:
             artifact: DraftFi-macos
           - os: windows-latest
             artifact: DraftFi-windows
+          - os: ubuntu-latest
+            artifact: DraftFi-linux
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -50,14 +52,30 @@ jobs:
         if: runner.os == 'Windows'
         run: Compress-Archive -Path dist_desktop/DraftFi/* -DestinationPath ${{ matrix.artifact }}.zip
 
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cd dist_desktop
+          tar -czf ../${{ matrix.artifact }}.tar.gz DraftFi
+
+      - name: Name the artifact file
+        id: artifact
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            echo "file=${{ matrix.artifact }}.tar.gz" >> "$GITHUB_OUTPUT"
+          else
+            echo "file=${{ matrix.artifact }}.zip" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}.zip
+          path: ${{ steps.artifact.outputs.file }}
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.artifact }}.zip
+          files: ${{ steps.artifact.outputs.file }}

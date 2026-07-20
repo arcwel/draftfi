@@ -451,3 +451,13 @@ class InsightsList(BaseModel):
 
 class NarrativeResult(BaseModel):
     narrative: str
+
+
+# --------------------------------------------------------------------------- #
+# Desktop update check (F1)
+# --------------------------------------------------------------------------- #
+class UpdateInfo(BaseModel):
+    current: str
+    latest: str | None = None
+    update_available: bool = False
+    url: str

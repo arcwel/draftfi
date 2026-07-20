@@ -24,6 +24,9 @@ async function request(path, options = {}) {
 export const api = {
   llmStatus: () => request('/llm/status'),
 
+  // F1: is a newer desktop release available?
+  updateCheck: () => request('/update-check'),
+
   llmConfig: () => request('/llm/config'),
 
   saveLlmConfig: (config) =>

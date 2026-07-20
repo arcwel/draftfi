@@ -9,3 +9,8 @@ pyobjc-core==11.0; sys_platform == "darwin"
 pyobjc-framework-Cocoa==11.0; sys_platform == "darwin"
 pyobjc-framework-WebKit==11.0; sys_platform == "darwin"
 pythonnet==3.0.5; sys_platform == "win32"
+
+# System-tray icon (Windows/Linux). macOS uses the native app menu instead,
+# so these are not installed there (avoids bloating the .app).
+pystray==0.19.5; sys_platform != "darwin"
+pillow==11.1.0; sys_platform != "darwin"

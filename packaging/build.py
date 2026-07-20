@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Cross-platform build script for the DraftFi desktop app.
 
-Produces a self-contained application (macOS ``.app`` / Windows ``.exe``) that
-bundles the Python runtime, all backend dependencies, and the built React
-frontend. End users install nothing — they download and double-click.
+Produces a self-contained application (macOS ``.app`` / Windows ``.exe`` /
+Linux onedir bundle) that packs the Python runtime, all backend dependencies,
+and the built React frontend. End users install nothing — they download and
+double-click (Linux: extract the tarball and run ``DraftFi/DraftFi``).
 
 Usage:
     python packaging/build.py [--skip-frontend] [--dist DIR]
 
 Run it from a machine matching the target OS (PyInstaller does not
-cross-compile). CI does exactly this on macOS and Windows runners.
+cross-compile). CI does exactly this on macOS, Windows, and Linux runners.
 """
 from __future__ import annotations
 
@@ -83,6 +84,9 @@ def build_app(dist_dir: Path) -> None:
     # falls back to the default browser).
     if _module_available("webview"):
         args += ["--collect-submodules", "webview"]
+    # Tray backend (Windows/Linux); PyInstaller needs its platform submodules.
+    if _module_available("pystray"):
+        args += ["--collect-submodules", "pystray"]
     icon = _icon_path()
     if icon:
         args += ["--icon", str(icon)]
@@ -97,6 +101,8 @@ def build_app(dist_dir: Path) -> None:
         print(f"  -> {dist_dir / (APP_NAME + '.app')}")
     elif sys.platform == "win32":
         print(f"  -> {dist_dir / APP_NAME / (APP_NAME + '.exe')}")
+    else:  # Linux (and other *nix): PyInstaller onedir bundle.
+        print(f"  -> {dist_dir / APP_NAME / APP_NAME}")
 
 
 def _icon_path() -> Path | None:
