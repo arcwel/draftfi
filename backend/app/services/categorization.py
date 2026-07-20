@@ -90,12 +90,17 @@ async def categorize_rows_batch(
     config: LLMConfig | None = None,
     *,
     llm_available: bool = True,
+    report: dict | None = None,
 ) -> list[Categorized]:
     """Resolve many rows at once: cache-first, then ONE LLM call for the misses.
 
     Batching cuts a 500-row import from ~500 model calls to ~20. Rows the batch
     response fails to cover fall back to individual calls; anything still
     unresolved degrades to Uncategorized. Returns results aligned with ``rows``.
+
+    Pass ``report`` (a dict) to learn *why* rows went unresolved: on a provider
+    failure it receives ``provider_error``, so the caller can surface a real
+    message instead of silently returning a pile of Uncategorized rows.
     """
     results: list[Categorized | None] = [None] * len(rows)
     uncat_id = _resolve_category_id(conn, UNCATEGORIZED)
@@ -134,20 +139,39 @@ async def categorize_rows_batch(
             index_of[raw] = len(unique)
             unique.append(raw)
 
+    provider_error: str | None = None
     try:
         batch = await llm.clean_merchants_batch(config, unique, category_names)
+    except llm.LLMUnavailable as exc:
+        # The endpoint refused us (rate limit / auth / outage). Retrying each
+        # row individually would multiply the load against a provider that is
+        # already saying no, so skip pass 3 and report why nothing resolved.
+        provider_error = str(exc)
+        batch = [None] * len(unique)
     except llm.LLMError:
         batch = [None] * len(unique)
+
+    if report is not None and provider_error:
+        report["provider_error"] = provider_error
 
     for i in misses:
         row = rows[i]
         outcome = batch[index_of[row.raw_description]]
         if outcome is None:
+            if provider_error:
+                results[i] = uncategorized_for(row)
+                continue
             # Pass 3: individual retry for stragglers the batch missed.
             try:
                 outcome = await llm.clean_merchant(
                     config, row.raw_description, category_names
                 )
+            except llm.LLMUnavailable as exc:
+                provider_error = str(exc)
+                if report is not None:
+                    report["provider_error"] = provider_error
+                results[i] = uncategorized_for(row)
+                continue
             except llm.LLMError:
                 results[i] = uncategorized_for(row)
                 continue

@@ -17,12 +17,21 @@ export default function SyncButton() {
   return (
     <div className="flex items-center gap-2">
       {result && !syncing && (
-        <span className="text-[11px] text-gray-400">
-          {result.recategorized > 0
-            ? `✓ Categorized ${result.recategorized}`
-            : result.still_uncategorized > 0
-              ? `${result.still_uncategorized} still uncategorized`
-              : 'Up to date'}
+        // A provider failure (rate limit, bad key, outage) must never look like
+        // a silent success — say what actually happened.
+        <span
+          className={`max-w-[22rem] truncate text-[11px] ${
+            result.detail ? 'text-amber-400' : 'text-gray-400'
+          }`}
+          title={result.detail || undefined}
+        >
+          {result.detail
+            ? `⚠ ${result.detail} · ${result.still_uncategorized} left uncategorized`
+            : result.recategorized > 0
+              ? `✓ Categorized ${result.recategorized}`
+              : result.still_uncategorized > 0
+                ? `${result.still_uncategorized} still uncategorized`
+                : 'Up to date'}
         </span>
       )}
       <button

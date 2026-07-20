@@ -32,12 +32,20 @@ async def test_sync_resolves_via_llm_when_available(conn, monkeypatch):
     async def fake_health(config):
         return True, 5.0, None
 
-    async def fake_clean(config, raw, cats, retries=1):
+    def _resolve(raw):
         if "AMZN" in raw:
             return llm.CleanResult(clean_merchant="Amazon", category="Shopping")
         return llm.CleanResult(clean_merchant="Shell", category="Transportation")
 
+    # Mock the batch call — that's the path production actually takes.
+    async def fake_batch(config, raws, cats):
+        return [_resolve(r) for r in raws]
+
+    async def fake_clean(config, raw, cats, retries=1):
+        return _resolve(raw)
+
     monkeypatch.setattr(llm, "health", fake_health)
+    monkeypatch.setattr(llm, "clean_merchants_batch", fake_batch)
     monkeypatch.setattr(llm, "clean_merchant", fake_clean)
 
     result = await sync.resync(conn)
@@ -84,3 +92,40 @@ async def test_sync_uses_cache_without_llm_call(conn, monkeypatch):
     result = await sync.resync(conn)
     assert result.recategorized == 1
     assert result.cache_hits == 1
+
+
+@pytest.mark.asyncio
+async def test_rate_limited_provider_is_reported_not_silently_swallowed(conn, monkeypatch):
+    """A 429 must surface as a reason and stop the run, not report a clean 'done'
+    while every row quietly stays Uncategorized."""
+    for i in range(60):  # > 2 chunks so the early-abort path is exercised
+        _add_uncategorized(conn, f"MERCHANT {i}", i)
+
+    async def fake_health(config):
+        return True, 5.0, None
+
+    calls = {"batch": 0, "single": 0}
+
+    async def rate_limited_batch(config, raws, cats):
+        calls["batch"] += 1
+        raise llm.LLMUnavailable("LLM endpoint error: Client error '429 Too Many Requests'")
+
+    async def should_not_run(config, raw, cats, retries=1):
+        calls["single"] += 1
+        raise AssertionError("must not retry per-row against a refusing provider")
+
+    monkeypatch.setattr(llm, "health", fake_health)
+    monkeypatch.setattr(llm, "clean_merchants_batch", rate_limited_batch)
+    monkeypatch.setattr(llm, "clean_merchant", should_not_run)
+
+    result = await sync.resync(conn)
+
+    assert result.recategorized == 0
+    assert "429" in (result.detail or ""), "the real reason must reach the UI"
+    assert result.stopped_early is True
+    # Bailed out after the failure threshold instead of grinding every chunk...
+    assert calls["batch"] == 2
+    # ...and never amplified into per-row calls.
+    assert calls["single"] == 0
+    # Every row is still accounted for as unresolved.
+    assert result.still_uncategorized == result.total

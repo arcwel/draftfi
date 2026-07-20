@@ -32,6 +32,10 @@ class SyncJob:
     still_uncategorized: int = 0
     llm_available: bool = False
     error: str | None = None
+    # Why rows stayed uncategorized (e.g. the provider rate-limited us). Set
+    # even on a "done" run so the UI never reports a silent no-op success.
+    detail: str | None = None
+    stopped_early: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -63,6 +67,12 @@ async def _run(conn: sqlite3.Connection, job: SyncJob) -> None:
 
     # One LLM call per chunk (see categorize_rows_batch) instead of per row.
     CHUNK = 25
+    # A provider that refuses one chunk will refuse the next; bail out rather
+    # than grinding through hundreds of doomed calls (and deepening a rate
+    # limit) while reporting a cheerful "done".
+    MAX_PROVIDER_FAILURES = 2
+    provider_failures = 0
+
     for start in range(0, len(rows), CHUNK):
         chunk = rows[start : start + CHUNK]
         parsed_chunk = [
@@ -74,8 +84,14 @@ async def _run(conn: sqlite3.Connection, job: SyncJob) -> None:
             )
             for tx in chunk
         ]
+        report: dict = {}
         outcomes = await categorization.categorize_rows_batch(
-            conn, parsed_chunk, category_names, config, llm_available=available
+            conn,
+            parsed_chunk,
+            category_names,
+            config,
+            llm_available=available,
+            report=report,
         )
         for tx, outcome in zip(chunk, outcomes, strict=False):
             if outcome.resolution in ("cache", "llm"):
@@ -97,6 +113,16 @@ async def _run(conn: sqlite3.Connection, job: SyncJob) -> None:
         category_names = [c["name"] for c in repo.list_categories(conn)]
         # Commit per chunk so progress is durable and status reads see it.
         conn.commit()
+
+        if report.get("provider_error"):
+            job.detail = report["provider_error"]
+            provider_failures += 1
+            if provider_failures >= MAX_PROVIDER_FAILURES:
+                job.stopped_early = True
+                job.still_uncategorized += len(rows) - job.processed
+                break
+        else:
+            provider_failures = 0
 
     conn.commit()
 

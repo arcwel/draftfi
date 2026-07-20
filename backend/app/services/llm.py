@@ -47,6 +47,15 @@ class LLMError(Exception):
     """Raised when the model is unreachable or returns unusable output."""
 
 
+class LLMUnavailable(LLMError):
+    """The endpoint itself failed (rate limit, auth, 5xx, connection).
+
+    Distinct from a parse failure: retrying individual rows against a provider
+    that just refused the batch only multiplies the load, so callers should back
+    off instead of falling back to per-row calls.
+    """
+
+
 # Providers such as Gemini carry the API key in the URL query string, which
 # httpx echoes verbatim in its error messages. Redact it before any detail can
 # reach the frontend or logs.
@@ -55,6 +64,24 @@ _KEY_IN_URL_RE = re.compile(r"([?&]key=)[^&\s'\"]+")
 
 def _redact(text: str) -> str:
     return _KEY_IN_URL_RE.sub(r"\1REDACTED", text)
+
+
+def _endpoint_error(exc: Exception) -> LLMUnavailable:
+    """Turn a transport/HTTP failure into a message a user can act on."""
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status == 429:
+        return LLMUnavailable(
+            "Provider rate limit reached (HTTP 429). Wait for your quota to "
+            "reset, or switch to a local Ollama model for bulk categorization."
+        )
+    if status in (401, 403):
+        return LLMUnavailable(
+            f"Provider rejected the API key (HTTP {status}). Check the key in "
+            "the LLM Provider panel."
+        )
+    if status is not None and status >= 500:
+        return LLMUnavailable(f"Provider is having trouble (HTTP {status}).")
+    return LLMUnavailable(_redact(f"Could not reach the provider: {exc}"))
 
 
 def parse_model_json(text: str) -> CleanResult:
@@ -327,7 +354,7 @@ async def clean_merchants_batch(
     try:
         text = await _generate(config, prompt, system)
     except httpx.HTTPError as exc:
-        raise LLMError(_redact(f"LLM endpoint error: {exc}")) from exc
+        raise _endpoint_error(exc) from exc
     return parse_batch_json(text, len(raw_descriptions))
 
 
@@ -340,7 +367,7 @@ async def generate_json(config: LLMConfig, system: str, prompt: str) -> dict:
     try:
         text = await _generate(config, prompt, system)
     except httpx.HTTPError as exc:
-        raise LLMError(_redact(f"LLM endpoint error: {exc}")) from exc
+        raise _endpoint_error(exc) from exc
     candidate = text.strip()
     if candidate.startswith("```"):
         candidate = candidate.strip("`")
@@ -380,7 +407,7 @@ async def clean_merchant(
             text = await _generate(config, prompt, system)
             return parse_model_json(text)
         except httpx.HTTPError as exc:
-            raise LLMError(_redact(f"LLM endpoint error: {exc}")) from exc
+            raise _endpoint_error(exc) from exc
         except LLMError as exc:
             last_exc = exc
             continue

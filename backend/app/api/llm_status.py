@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -18,6 +19,16 @@ from app.services import llm, llm_config
 from app.services.llm_config import PROVIDERS, LLMConfig
 
 router = APIRouter(prefix="/llm", tags=["llm"])
+
+# The status pill polls this endpoint continuously, and for cloud providers each
+# check is a real API request that counts against the user's quota. Cache the
+# result briefly so polling can never burn through a rate limit on its own.
+_HEALTH_TTL_SECONDS = 60.0
+_health_cache: dict[tuple, tuple[float, LLMStatus]] = {}
+
+
+def _invalidate_health_cache() -> None:
+    _health_cache.clear()
 
 
 def _transient_config(conn: sqlite3.Connection, body: LLMConfigIn) -> LLMConfig:
@@ -38,8 +49,13 @@ def _transient_config(conn: sqlite3.Connection, body: LLMConfigIn) -> LLMConfig:
 @router.get("/status", response_model=LLMStatus)
 async def llm_status(conn: sqlite3.Connection = Depends(get_db)) -> LLMStatus:
     config = llm_config.resolve_config(conn)
+    key = (config.provider, config.model, config.base_url)
+    cached = _health_cache.get(key)
+    if cached and (time.monotonic() - cached[0]) < _HEALTH_TTL_SECONDS:
+        return cached[1]
+
     available, latency_ms, detail = await llm.health(config)
-    return LLMStatus(
+    status = LLMStatus(
         available=available,
         latency_ms=latency_ms,
         provider=config.provider,
@@ -47,6 +63,8 @@ async def llm_status(conn: sqlite3.Connection = Depends(get_db)) -> LLMStatus:
         model=config.model,
         detail=detail,
     )
+    _health_cache[key] = (time.monotonic(), status)
+    return status
 
 
 def _config_out(conn: sqlite3.Connection) -> LLMConfigOut:
@@ -123,6 +141,7 @@ def put_config(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     conn.commit()
+    _invalidate_health_cache()
     return _config_out(conn)
 
 
@@ -136,4 +155,5 @@ def delete_key(
         raise HTTPException(status_code=404, detail="Unknown provider.")
     llm_config.clear_key(conn, provider)
     conn.commit()
+    _invalidate_health_cache()
     return _config_out(conn)

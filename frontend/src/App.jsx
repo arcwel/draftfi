@@ -20,8 +20,10 @@ export default function App() {
 
   useEffect(() => {
     boot()
-    // Keep the LLM status pill live.
-    const id = setInterval(pollLlm, 8000)
+    // Keep the LLM status pill live. Every poll is a real request against the
+    // provider's quota for cloud backends, so keep it infrequent (the backend
+    // also caches the verdict) rather than hammering it every few seconds.
+    const id = setInterval(pollLlm, 60000)
     return () => clearInterval(id)
   }, [boot, pollLlm])
 
