@@ -30,8 +30,9 @@ ever leaves your computer.
   sparklines, per-category targets (with over/under flags and rollover), a
   specific-month view, and a **cash-flow** chart across your history.
 - 🔁 **Recurring-charge detection & insights** — DraftFi surfaces your recurring
-  subscriptions and generates plain-English monthly insights ("Dining up 46% vs.
-  your recent average"), optionally narrated by your LLM.
+  charges (subscriptions, rent, utilities) and generates plain-English monthly
+  insights ("Dining up 46% vs. your recent average"), optionally narrated by
+  your LLM.
 - 📈 **Real simulation engine** — a tactical cash-runway (12–72 mo) and macro
   wealth (5–30 yr) view with **loan amortization**, income/expense **change
   events**, an **inflation** toggle, and **goal tracking** (on/off-track).
@@ -52,7 +53,7 @@ ever leaves your computer.
 
 **One dense workspace.** Import a bank statement in the sidebar; DraftFi cleans
 and categorizes every transaction, then shows your monthly budget with per-
-category sparklines, detected subscriptions, savings goals, and sandbox
+category sparklines, detected recurring charges, savings goals, and sandbox
 branches — all on one screen.
 
 ![DraftFi dashboard](docs/screenshots/dashboard.png)

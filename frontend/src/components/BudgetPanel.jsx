@@ -90,7 +90,7 @@ export default function BudgetPanel() {
           >
             <span>🔁</span>
             <span className="font-medium">
-              Subscriptions: {money(subscriptions.total_monthly)}/mo
+              Recurring charges: {money(subscriptions.total_monthly)}/mo
             </span>
             <span className="text-violet-400/70">
               {subscriptions.items.filter((s) => s.active).length} active
