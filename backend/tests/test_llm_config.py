@@ -80,3 +80,47 @@ def test_defaults_fill_in_on_blank_model(client):
     client.put("/llm/config", json={"provider": "gemini", "api_key": "gm"})
     body = client.get("/llm/config").json()
     assert body["model"] == llm_config.PROVIDERS["gemini"].default_model
+
+
+# --------------------------------------------------------------------------- #
+# G1 — API keys stored in the OS keychain (plaintext fallback)
+# --------------------------------------------------------------------------- #
+def test_key_stored_in_keychain_when_available(conn, monkeypatch):
+    import types
+
+    from app.db import repository as repo
+
+    store = {}
+    fake = types.SimpleNamespace(
+        set_password=lambda s, u, p: store.__setitem__((s, u), p),
+        get_password=lambda s, u: store.get((s, u)),
+        delete_password=lambda s, u: store.pop((s, u), None),
+    )
+    monkeypatch.setattr(llm_config, "keyring", fake)
+    monkeypatch.setattr(llm_config, "_keyring_state", None)
+    monkeypatch.delenv("DRAFTFI_NO_KEYRING", raising=False)
+
+    llm_config.save_config(conn, provider="openai", api_key="sk-secret")
+
+    # The DB row holds only a marker — never the secret itself.
+    assert repo.get_setting(conn, "llm_api_key:openai") == llm_config._KEYRING_MARKER
+    assert ("DraftFi", "llm_api_key:openai") in store
+    # And it resolves back through the keychain.
+    assert llm_config.get_key(conn, "openai") == "sk-secret"
+    assert llm_config.has_key(conn, "openai") is True
+
+    llm_config.clear_key(conn, "openai")
+    assert llm_config.get_key(conn, "openai") is None
+    assert ("DraftFi", "llm_api_key:openai") not in store
+
+
+def test_key_plaintext_fallback_without_keychain(conn, monkeypatch):
+    from app.db import repository as repo
+
+    monkeypatch.setattr(llm_config, "_keyring_state", None)
+    monkeypatch.setenv("DRAFTFI_NO_KEYRING", "1")
+
+    llm_config.save_config(conn, provider="openai", api_key="sk-plain")
+    # Fallback stores the key directly (dev / headless).
+    assert repo.get_setting(conn, "llm_api_key:openai") == "sk-plain"
+    assert llm_config.get_key(conn, "openai") == "sk-plain"

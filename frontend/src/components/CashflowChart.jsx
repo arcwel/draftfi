@@ -1,3 +1,4 @@
+import { money } from '../lib/format'
 import { memo, useMemo } from 'react'
 import {
   Bar,
@@ -9,13 +10,6 @@ import {
   YAxis,
 } from 'recharts'
 import { LegendItem } from './RunwayChart'
-
-const money = (n) =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 0,
-  }).format(n || 0)
 
 // Month-over-month cash flow: income vs. spending bars with a net line (D3),
 // giving the actuals-over-time view that complements the forward forecast.

@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 os.environ.setdefault("DRAFTFI_DB_PATH", ":memory:")
+# Keep tests off the real OS keychain — key storage falls back to plaintext.
+os.environ.setdefault("DRAFTFI_NO_KEYRING", "1")
 
 SAMPLE_DIR = Path(__file__).resolve().parent.parent / "sample_data"
 

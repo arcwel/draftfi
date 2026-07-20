@@ -1,15 +1,7 @@
+import { money, signed } from '../lib/format'
 import { useState } from 'react'
 import { useStore } from '../store/useStore'
 import Sparkline from './Sparkline'
-
-const money = (n) =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 0,
-  }).format(n || 0)
-
-const signed = (n) => `${n >= 0 ? '+' : '−'}${money(Math.abs(n))}`
 
 const monthLabel = (ym) => {
   const [y, m] = ym.split('-')

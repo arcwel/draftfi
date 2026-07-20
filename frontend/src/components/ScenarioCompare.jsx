@@ -1,3 +1,4 @@
+import { money, signed } from '../lib/format'
 import { useMemo } from 'react'
 import {
   Line,
@@ -8,15 +9,6 @@ import {
   YAxis,
 } from 'recharts'
 import { useStore } from '../store/useStore'
-
-const money = (n) =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 0,
-  }).format(n || 0)
-
-const signed = (n) => `${n >= 0 ? '+' : '−'}${money(Math.abs(n))}`
 
 // Distinct line colors; base always uses the first (slate) slot.
 const COLORS = ['#94a3b8', '#38bdf8', '#a855f7', '#f59e0b', '#22c55e', '#f43f5e']

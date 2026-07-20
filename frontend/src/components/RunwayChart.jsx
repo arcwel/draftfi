@@ -1,3 +1,4 @@
+import { money } from '../lib/format'
 import { memo, useMemo } from 'react'
 import {
   Area,
@@ -9,13 +10,6 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-
-const money = (n) =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 0,
-  }).format(n || 0)
 
 // Chart A — Tactical Runway (PRD 5.1). Amber/red highlight below safety floor.
 function RunwayChart({ series, compare }) {

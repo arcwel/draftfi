@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { api } from '../lib/api'
+import { setFormat } from '../lib/format'
 
 const DEFAULT_PARAMS = {
   starting_cash: 25000,
@@ -44,6 +45,9 @@ export const useStore = create((set, get) => ({
   insights: [], // A4: heuristic month-over-month insights
   updateInfo: null, // F1: { current, latest, update_available, url }
   updateDismissed: false, // F1: user closed the update banner this session
+  preferences: { currency: 'USD', locale: 'en-US' }, // G4
+  security: { passcode_set: false, locked: false }, // G2
+  booted: false, // G2: security-gate check complete
   budget: null, // BudgetSummary: monthly spending + scenario impact
   trends: null, // TrendsSummary: month-over-month cash flow + category series
   budgetMonth: null, // null = all-time average; else "YYYY-MM"
@@ -57,6 +61,58 @@ export const useStore = create((set, get) => ({
   syncProgress: null, // { processed, total } while a sync runs
 
   // ---- bootstrapping ---- //
+  // G2: run BEFORE loading data. Checks the passcode gate; only loads the app
+  // (including preferences, which are gated while locked) once unlocked.
+  async boot() {
+    let security = { passcode_set: false, locked: false }
+    try {
+      security = await api.security()
+    } catch {
+      /* not reachable — treat as unlocked */
+    }
+    set({ security, booted: true })
+    if (!security.locked) await get().init()
+  },
+
+  // G4: load and apply the saved currency/locale (runs post-unlock via init).
+  async loadPreferences() {
+    try {
+      const prefs = await api.preferences()
+      setFormat(prefs)
+      set({ preferences: prefs })
+    } catch {
+      /* keep defaults */
+    }
+  },
+
+  async unlock(passcode) {
+    const res = await api.unlock(passcode)
+    if (res.ok) {
+      set({ security: { ...get().security, locked: false } })
+      await get().init()
+    }
+    return res.ok
+  },
+
+  // G4: change currency/locale. Updating `preferences` re-keys the workspace in
+  // App, remounting it so every formatted value re-renders in the new currency.
+  async updatePreferences(patch) {
+    const prefs = await api.setPreferences(patch)
+    setFormat(prefs)
+    set({ preferences: prefs })
+  },
+
+  // G2: passcode management (from the settings panel).
+  async setPasscode(passcode, current) {
+    const security = await api.setPasscode(passcode, current)
+    set({ security })
+  },
+
+  async removePasscode(current) {
+    const security = await api.clearPasscode(current)
+    set({ security })
+  },
+
   async init() {
     await Promise.all([
       get().loadCategories(),
@@ -66,6 +122,7 @@ export const useStore = create((set, get) => ({
       get().loadLlmConfig(),
       get().loadGoals(),
       get().checkForUpdate(),
+      get().loadPreferences(),
     ])
     await get().recompute()
   },

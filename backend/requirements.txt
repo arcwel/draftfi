@@ -4,6 +4,7 @@ pydantic==2.10.4
 pydantic-settings==2.7.1
 httpx==0.28.1
 python-multipart==0.0.20
+keyring==25.6.0        # encrypt API keys in the OS keychain (plaintext fallback)
 
 # Dev / test
 pytest==8.3.4

@@ -461,3 +461,41 @@ class UpdateInfo(BaseModel):
     latest: str | None = None
     update_available: bool = False
     url: str
+
+
+# --------------------------------------------------------------------------- #
+# Security: app passcode (G2)
+# --------------------------------------------------------------------------- #
+class SecurityStatus(BaseModel):
+    passcode_set: bool
+    locked: bool
+
+
+class PasscodeSet(BaseModel):
+    passcode: str = Field(min_length=4, max_length=64)
+    current: str | None = None  # required when changing an existing passcode
+
+
+class PasscodeClear(BaseModel):
+    current: str
+
+
+class UnlockRequest(BaseModel):
+    passcode: str
+
+
+class UnlockResult(BaseModel):
+    ok: bool
+
+
+# --------------------------------------------------------------------------- #
+# Preferences: currency + locale (G4)
+# --------------------------------------------------------------------------- #
+class Preferences(BaseModel):
+    currency: str
+    locale: str
+
+
+class PreferencesUpdate(BaseModel):
+    currency: str | None = Field(default=None, max_length=8)
+    locale: str | None = Field(default=None, max_length=16)

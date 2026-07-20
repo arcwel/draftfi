@@ -1,12 +1,10 @@
+import { amount } from '../lib/format'
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { ResolutionBadge } from '../components/CategoryBadge'
 import TransactionModal from '../components/TransactionModal'
 import SplitModal from '../components/SplitModal'
 import CategoryManager from '../components/CategoryManager'
-
-const money = (n) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n || 0)
 
 // Zone 4: transaction categorization ledger. Search, sort, and paging run
 // server-side over the full database (not just a loaded window).
@@ -47,7 +45,7 @@ export default function Ledger() {
       ? 'Delete this transaction AND its split parts?'
       : 'Delete this transaction?'
     const ok = window.confirm(
-      `${label}\n\n${t.date} · ${t.clean_merchant || t.raw_description} · ${money(t.amount)}`,
+      `${label}\n\n${t.date} · ${t.clean_merchant || t.raw_description} · ${amount(t.amount)}`,
     )
     if (ok) await deleteTransaction(t.id)
   }
@@ -167,7 +165,7 @@ export default function Ledger() {
                       t.amount >= 0 ? 'text-emerald-400' : 'text-gray-300'
                     }`}
                   >
-                    {money(t.amount)}
+                    {amount(t.amount)}
                   </td>
                   <td className="px-2 py-1.5">
                     {t.is_split_parent ? (

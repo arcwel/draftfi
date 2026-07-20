@@ -1,17 +1,9 @@
+import { money, signed } from '../lib/format'
 import { useState } from 'react'
 import { useStore } from '../store/useStore'
 import MilestoneModal from '../components/MilestoneModal'
 import EventModal from '../components/EventModal'
 import ScenarioInput from '../components/ScenarioInput'
-
-const money = (n) =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 0,
-  }).format(n || 0)
-
-const signedMoney = (n) => `${n >= 0 ? '+' : '−'}${money(Math.abs(n))}`
 
 // Zone 2: interactive simulation parameter strip (PRD 4.2).
 export default function SimulationStrip() {
@@ -153,7 +145,7 @@ export default function SimulationStrip() {
             </span>
             <span className="truncate max-w-[120px] text-gray-300">{e.label}</span>
             <span className="text-gray-400">
-              {e.mode === 'set' ? money(e.amount) : signedMoney(e.amount)}
+              {e.mode === 'set' ? money(e.amount) : signed(e.amount)}
             </span>
             <span className="text-gray-500">m{e.month}</span>
             <span

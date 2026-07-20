@@ -27,6 +27,36 @@ export const api = {
   // F1: is a newer desktop release available?
   updateCheck: () => request('/update-check'),
 
+  // G4: currency/locale preferences.
+  preferences: () => request('/preferences'),
+  setPreferences: (patch) =>
+    request('/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+
+  // G2: app passcode + lock.
+  security: () => request('/security'),
+  setPasscode: (passcode, current) =>
+    request('/security/passcode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ passcode, current }),
+    }),
+  clearPasscode: (current) =>
+    request('/security/passcode/clear', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current }),
+    }),
+  unlock: (passcode) =>
+    request('/security/unlock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ passcode }),
+    }),
+
   llmConfig: () => request('/llm/config'),
 
   saveLlmConfig: (config) =>

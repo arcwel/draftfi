@@ -1,3 +1,4 @@
+import { money } from '../lib/format'
 import { memo, useMemo, useState } from 'react'
 import {
   Area,
@@ -9,13 +10,6 @@ import {
   YAxis,
 } from 'recharts'
 import { LegendItem } from './RunwayChart'
-
-const money = (n) =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 0,
-  }).format(n || 0)
 
 // Chart B — Macro Wealth (PRD 5.2). Stacked assets-over-debt; dashed base line.
 function MacroChart({ series, compare }) {

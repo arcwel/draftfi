@@ -13,10 +13,22 @@ The raw key value is never sent back to the frontend — only a ``has_key`` flag
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 from dataclasses import dataclass
 
 from app.db import repository as repo
+
+try:  # OS keychain is optional — headless/CI installs fall back to plaintext.
+    import keyring
+except Exception:  # pragma: no cover - keyring not installed
+    keyring = None
+
+# When a key lives in the OS keychain, app_settings only stores this marker
+# (never the secret). Legacy/fallback rows store the plaintext key directly.
+KEYRING_SERVICE = "DraftFi"
+_KEYRING_MARKER = "__keyring__"
+_keyring_state: bool | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -84,6 +96,41 @@ def _key_setting(provider: str) -> str:
     return f"llm_api_key:{provider}"
 
 
+def _keyring_usable() -> bool:
+    """True when the OS keychain can round-trip a secret (probed once, cached).
+
+    Set ``DRAFTFI_NO_KEYRING=1`` to force plaintext (headless servers, tests).
+    """
+    global _keyring_state
+    if _keyring_state is not None:
+        return _keyring_state
+    if keyring is None or os.environ.get("DRAFTFI_NO_KEYRING"):
+        _keyring_state = False
+        return False
+    try:
+        probe = f"{KEYRING_SERVICE}:probe"
+        keyring.set_password(KEYRING_SERVICE, probe, "1")
+        ok = keyring.get_password(KEYRING_SERVICE, probe) == "1"
+        keyring.delete_password(KEYRING_SERVICE, probe)
+        _keyring_state = bool(ok)
+    except Exception:
+        _keyring_state = False
+    return _keyring_state
+
+
+def _store_key(conn: sqlite3.Connection, provider: str, api_key: str) -> None:
+    """Persist a key to the OS keychain (marker in the DB), else plaintext."""
+    key_id = _key_setting(provider)
+    if _keyring_usable():
+        try:
+            keyring.set_password(KEYRING_SERVICE, key_id, api_key)
+            repo.set_setting(conn, key_id, _KEYRING_MARKER)
+            return
+        except Exception:  # pragma: no cover - keychain write failed at runtime
+            pass
+    repo.set_setting(conn, key_id, api_key)
+
+
 @dataclass
 class LLMConfig:
     provider: str
@@ -136,17 +183,37 @@ def save_config(
         conn, K_BASE_URL, (base_url or "").strip() or spec.default_base_url
     )
     if api_key is not None and api_key.strip():
-        repo.set_setting(conn, _key_setting(provider), api_key.strip())
+        _store_key(conn, provider, api_key.strip())
 
 
 def has_key(conn: sqlite3.Connection, provider: str) -> bool:
+    """A key exists when the DB has a marker or plaintext row for the provider."""
     return bool(repo.get_setting(conn, _key_setting(provider)))
 
 
 def get_key(conn: sqlite3.Connection, provider: str) -> str | None:
-    """Return the stored API key for a provider (or None)."""
-    return repo.get_setting(conn, _key_setting(provider))
+    """Return the stored API key for a provider (or None).
+
+    Resolves the keychain when the row is a marker; otherwise it's a legacy or
+    fallback plaintext value.
+    """
+    key_id = _key_setting(provider)
+    stored = repo.get_setting(conn, key_id)
+    if not stored:
+        return None
+    if stored == _KEYRING_MARKER:
+        try:
+            return keyring.get_password(KEYRING_SERVICE, key_id)
+        except Exception:  # pragma: no cover - keychain read failed at runtime
+            return None
+    return stored
 
 
 def clear_key(conn: sqlite3.Connection, provider: str) -> None:
-    repo.set_setting(conn, _key_setting(provider), None)
+    key_id = _key_setting(provider)
+    if repo.get_setting(conn, key_id) == _KEYRING_MARKER:
+        try:
+            keyring.delete_password(KEYRING_SERVICE, key_id)
+        except Exception:  # pragma: no cover
+            pass
+    repo.set_setting(conn, key_id, None)

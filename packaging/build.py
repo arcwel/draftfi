@@ -87,6 +87,16 @@ def build_app(dist_dir: Path) -> None:
     # Tray backend (Windows/Linux); PyInstaller needs its platform submodules.
     if _module_available("pystray"):
         args += ["--collect-submodules", "pystray"]
+    # keyring discovers OS backends via entry points — bundle its submodules AND
+    # metadata so the keychain works in the frozen app (else it falls back to
+    # plaintext). G1.
+    if _module_available("keyring"):
+        args += [
+            "--collect-submodules",
+            "keyring",
+            "--copy-metadata",
+            "keyring",
+        ]
     icon = _icon_path()
     if icon:
         args += ["--icon", str(icon)]

@@ -1,16 +1,10 @@
+import { money } from '../lib/format'
 import { useState } from 'react'
 import { useStore } from '../store/useStore'
 
-const money = (n) =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 0,
-  }).format(n || 0)
-
 // Evaluate a goal against the active scenario's already-computed series (E5).
 // Cash goals read the runway; net-worth goals read the macro (yearly) series.
-function evaluate(goal, series) {
+export function evaluate(goal, series) {
   if (!series) return { projected: null, onTrack: false }
   let projected = null
   if (goal.kind === 'cash') {

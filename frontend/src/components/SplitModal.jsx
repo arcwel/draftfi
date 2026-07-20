@@ -1,8 +1,6 @@
+import { amount } from '../lib/format'
 import { useState } from 'react'
 import { useStore } from '../store/useStore'
-
-const money = (n) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n || 0)
 
 const inputCls =
   'w-full rounded-md border border-edge bg-ink px-2 py-1 text-sm text-gray-100 focus:border-sky-500 focus:outline-none'
@@ -57,7 +55,7 @@ export default function SplitModal({ tx, onClose }) {
       >
         <h3 className="mb-1 text-sm font-semibold text-white">Split Transaction</h3>
         <p className="mb-3 text-xs text-gray-500">
-          {tx.clean_merchant || tx.raw_description} · {money(tx.amount)}
+          {tx.clean_merchant || tx.raw_description} · {amount(tx.amount)}
         </p>
 
         <div className="space-y-2">
@@ -107,7 +105,7 @@ export default function SplitModal({ tx, onClose }) {
           <span className={balanced ? 'text-emerald-400' : 'text-amber-400'}>
             {balanced
               ? '✓ Amounts balance'
-              : `${money(remainder)} left to allocate`}
+              : `${amount(remainder)} left to allocate`}
           </span>
         </div>
 

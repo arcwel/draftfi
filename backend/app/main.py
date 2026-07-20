@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
@@ -23,10 +23,13 @@ from app.api import (
     simulation,
     transactions,
 )
+from app.api import (
+    settings as settings_api,
+)
 from app.config import get_settings
-from app.db.connection import init_db
+from app.db.connection import init_db, session
 from app.models.schemas import UpdateInfo
-from app.services import updates
+from app.services import security, updates
 
 
 def _frontend_dir() -> Path | None:
@@ -52,6 +55,9 @@ def _frontend_dir() -> Path | None:
 async def lifespan(app: FastAPI):
     # Create/upgrade the local SQLite database and seed defaults on boot.
     init_db()
+    # Start locked when a passcode is configured (G2).
+    with session() as conn:
+        security.refresh_lock_state(conn)
     yield
 
 
@@ -71,6 +77,18 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    @app.middleware("http")
+    async def _passcode_gate(request, call_next):
+        """G2: while locked, refuse data routes with 423 (the SPA + lock-screen
+        endpoints stay reachable so the user can enter their passcode)."""
+        if security.is_locked() and not security.path_allowed_when_locked(
+            request.url.path
+        ):
+            return JSONResponse(
+                {"detail": "DraftFi is locked."}, status_code=423
+            )
+        return await call_next(request)
+
     app.include_router(imports.router)
     app.include_router(transactions.router)
     app.include_router(llm_status.router)
@@ -78,6 +96,7 @@ def create_app() -> FastAPI:
     app.include_router(budget.router)
     app.include_router(goals.router)
     app.include_router(insights.router)
+    app.include_router(settings_api.router)
     app.include_router(data.router)
     app.include_router(scenario.router)
     app.include_router(export.router)

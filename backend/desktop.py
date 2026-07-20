@@ -45,15 +45,16 @@ def _free_port() -> int:
 # --------------------------------------------------------------------------- #
 # Single-instance guard (F2)
 # --------------------------------------------------------------------------- #
-def _acquire_single_instance() -> socket.socket | None:
+def _acquire_single_instance(port: int = _LOCK_PORT) -> socket.socket | None:
     """Bind the lock port. Returns the socket if we're first, else ``None``.
 
     We deliberately do NOT set SO_REUSEADDR so a second process's bind fails
-    while the first instance holds the listening socket.
+    while the first instance holds the listening socket. ``port`` is overridable
+    only for tests.
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        sock.bind(("127.0.0.1", _LOCK_PORT))
+        sock.bind(("127.0.0.1", port))
         sock.listen(5)
         return sock
     except OSError:
