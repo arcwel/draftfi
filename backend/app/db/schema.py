@@ -171,13 +171,36 @@ def _current_version(conn: sqlite3.Connection) -> int:
     return row[0] or 0
 
 
+def _statements(sql: str):
+    """Yield individual SQL statements from a migration.
+
+    Line comments are stripped FIRST so a ``;`` inside a comment can't split a
+    statement, then the remainder is split on the statement terminator.
+    """
+    no_comments = "\n".join(line.split("--", 1)[0] for line in sql.splitlines())
+    for chunk in no_comments.split(";"):
+        code = chunk.strip()
+        if code:
+            yield code
+
+
 def apply_migrations(conn: sqlite3.Connection) -> None:
-    """Apply any pending migrations in a single transaction per migration."""
+    """Apply pending migrations, committing after each.
+
+    Statements run individually and re-applying an ``ADD COLUMN`` is tolerated,
+    so a migration interrupted midway (crash/disk-full) can be safely re-run on
+    the next launch instead of bricking startup with "duplicate column name".
+    """
     current = _current_version(conn)
     for version, description, sql in MIGRATIONS:
         if version <= current:
             continue
-        conn.executescript(sql)
+        for stmt in _statements(sql):
+            try:
+                conn.execute(stmt)
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
         conn.execute(
             "INSERT INTO schema_migrations (version, description) VALUES (?, ?)",
             (version, description),

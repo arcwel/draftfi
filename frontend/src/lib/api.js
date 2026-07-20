@@ -5,8 +5,23 @@
 // hit the API at the same origin with no prefix.
 const BASE = import.meta.env.PROD ? '' : '/api'
 
+// Abort a request that hangs so a stuck backend can't freeze the whole app
+// (e.g. a permanent blank boot while waiting on the security check).
+const DEFAULT_TIMEOUT_MS = 20000
+
 async function request(path, options = {}) {
-  const res = await fetch(`${BASE}${path}`, options)
+  const { timeout = DEFAULT_TIMEOUT_MS, ...init } = options
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeout)
+  let res
+  try {
+    res = await fetch(`${BASE}${path}`, { ...init, signal: controller.signal })
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('Request timed out')
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
   if (!res.ok) {
     let detail = res.statusText
     try {

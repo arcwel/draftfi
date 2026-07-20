@@ -13,6 +13,16 @@ router = APIRouter(prefix="/import", tags=["import"])
 
 ALLOWED_EXT = (".csv", ".ofx", ".qfx", ".qif")
 
+# Hold strong references to in-flight background tasks — the event loop only
+# keeps a weak reference, so an un-retained task can be GC'd mid-import.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _spawn(coro) -> None:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
 
 @router.post("/csv")
 async def import_files(
@@ -50,7 +60,7 @@ async def import_files(
             ) from exc
 
     job = ingestion.new_job(uuid.uuid4().hex)
-    asyncio.create_task(
+    _spawn(
         ingestion.run_import_job(job.job_id, payloads, account_name, parsed_mapping)
     )
     return {"job_id": job.job_id}

@@ -124,3 +124,25 @@ def test_key_plaintext_fallback_without_keychain(conn, monkeypatch):
     # Fallback stores the key directly (dev / headless).
     assert repo.get_setting(conn, "llm_api_key:openai") == "sk-plain"
     assert llm_config.get_key(conn, "openai") == "sk-plain"
+
+
+def test_resolve_config_returns_real_key_not_marker(conn, monkeypatch):
+    """Regression: resolve_config must resolve the keychain, not hand the
+    '__keyring__' marker to providers (would send Bearer __keyring__ -> 401)."""
+    import types
+
+    store = {}
+    fake = types.SimpleNamespace(
+        set_password=lambda s, u, p: store.__setitem__((s, u), p),
+        get_password=lambda s, u: store.get((s, u)),
+        delete_password=lambda s, u: store.pop((s, u), None),
+    )
+    monkeypatch.setattr(llm_config, "keyring", fake)
+    monkeypatch.setattr(llm_config, "_keyring_state", None)
+    monkeypatch.delenv("DRAFTFI_NO_KEYRING", raising=False)
+
+    llm_config.save_config(conn, provider="openai", model="gpt-4o-mini", api_key="sk-real")
+    cfg = llm_config.resolve_config(conn)
+    assert cfg.provider == "openai"
+    assert cfg.api_key == "sk-real"
+    assert cfg.api_key != llm_config._KEYRING_MARKER

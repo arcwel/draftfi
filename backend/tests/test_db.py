@@ -94,3 +94,24 @@ def test_fk_set_null_on_category_delete(conn):
     conn.execute("DELETE FROM categories WHERE id = ?", (cat,))
     row = conn.execute("SELECT category_id FROM transactions").fetchone()
     assert row["category_id"] is None
+
+
+def test_migrations_idempotent_after_interruption():
+    """A migration interrupted after applying an ADD COLUMN must be re-runnable
+    (no 'duplicate column name' brick on the next launch)."""
+    from app.db import schema
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    schema.apply_migrations(conn)  # bring fully up to date
+
+    # Simulate an interrupted migration 6: its column exists, but its version
+    # row was never recorded (process died before the commit).
+    conn.execute("DELETE FROM schema_migrations WHERE version >= 6")
+    # budget_rollover (migration 6) is already present from the first run.
+
+    # Re-running must tolerate the duplicate column and finish cleanly.
+    schema.apply_migrations(conn)
+    versions = [r[0] for r in conn.execute("SELECT version FROM schema_migrations")]
+    assert max(versions) == max(v for v, _, _ in schema.MIGRATIONS)
+    conn.close()

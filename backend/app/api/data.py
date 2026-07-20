@@ -14,6 +14,10 @@ from app.services import sync as sync_service
 
 router = APIRouter(tags=["data"])
 
+# Retain in-flight tasks (the loop only holds a weak ref) so a sync can't be
+# garbage-collected mid-run and leave its job stuck without a terminal state.
+_background_tasks: set[asyncio.Task] = set()
+
 
 @router.post("/sync")
 async def sync() -> dict:
@@ -23,7 +27,9 @@ async def sync() -> dict:
     progress (processed / total) so large batches show real movement.
     """
     job = sync_service.new_job(uuid.uuid4().hex)
-    asyncio.create_task(sync_service.run_sync_job(job.job_id))
+    task = asyncio.create_task(sync_service.run_sync_job(job.job_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
     return {"job_id": job.job_id}
 
 

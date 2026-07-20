@@ -154,7 +154,9 @@ def resolve_config(conn: sqlite3.Connection) -> LLMConfig:
         provider=provider,
         model=settings.get(K_MODEL) or spec.default_model,
         base_url=settings.get(K_BASE_URL) or spec.default_base_url,
-        api_key=settings.get(_key_setting(provider)),
+        # Resolve through the keychain — the DB row may be only a marker (G1),
+        # so never hand the raw setting value to the provider.
+        api_key=get_key(conn, provider),
     )
 
 

@@ -66,7 +66,9 @@ export const useStore = create((set, get) => ({
   async boot() {
     let security = { passcode_set: false, locked: false }
     try {
-      security = await api.security()
+      const res = await api.security()
+      // Guard against an unexpected/null shape so App never derefs undefined.
+      if (res && typeof res.locked === 'boolean') security = res
     } catch {
       /* not reachable — treat as unlocked */
     }
@@ -78,15 +80,22 @@ export const useStore = create((set, get) => ({
   async loadPreferences() {
     try {
       const prefs = await api.preferences()
-      setFormat(prefs)
-      set({ preferences: prefs })
+      if (prefs && prefs.currency && prefs.locale) {
+        setFormat(prefs)
+        set({ preferences: prefs })
+      }
     } catch {
       /* keep defaults */
     }
   },
 
   async unlock(passcode) {
-    const res = await api.unlock(passcode)
+    let res
+    try {
+      res = await api.unlock(passcode)
+    } catch {
+      return false // offline / server error — LockScreen shows a retry
+    }
     if (res.ok) {
       set({ security: { ...get().security, locked: false } })
       await get().init()
@@ -114,7 +123,9 @@ export const useStore = create((set, get) => ({
   },
 
   async init() {
-    await Promise.all([
+    // allSettled so one failing endpoint (500/offline) can't abort the rest or
+    // skip recompute — the app still renders what loaded and stays interactive.
+    await Promise.allSettled([
       get().loadCategories(),
       get().loadTransactions(),
       get().loadBranches(),
@@ -362,15 +373,20 @@ export const useStore = create((set, get) => ({
   async recompute() {
     const { parameters, milestones, events, overlay, activeBranchId, branches } = get()
     const active = branches.find((b) => b.id === activeBranchId)
-    // Forecast (runway + macro) and budget update together off the same inputs.
-    await Promise.all([
+    // allSettled + a guarded forecast branch so a failed simulate/compare (fired
+    // and forgotten from slider drags) can't become an unhandled rejection.
+    await Promise.allSettled([
       (async () => {
-        if (overlay && active && !active.is_base) {
-          const cmp = await api.compare(activeBranchId)
-          set({ compare: cmp, series: cmp.branch })
-        } else {
-          const series = await api.simulate(parameters, milestones, events)
-          set({ series, compare: null })
+        try {
+          if (overlay && active && !active.is_base) {
+            const cmp = await api.compare(activeBranchId)
+            set({ compare: cmp, series: cmp.branch })
+          } else {
+            const series = await api.simulate(parameters, milestones, events)
+            set({ series, compare: null })
+          }
+        } catch {
+          /* keep the last good forecast */
         }
       })(),
       get().loadBudget(),
