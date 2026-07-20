@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useStore } from '../store/useStore'
 import MilestoneModal from '../components/MilestoneModal'
+import EventModal from '../components/EventModal'
 import ScenarioInput from '../components/ScenarioInput'
 
 const money = (n) =>
@@ -10,6 +11,8 @@ const money = (n) =>
     maximumFractionDigits: 0,
   }).format(n || 0)
 
+const signedMoney = (n) => `${n >= 0 ? '+' : '−'}${money(Math.abs(n))}`
+
 // Zone 2: interactive simulation parameter strip (PRD 4.2).
 export default function SimulationStrip() {
   const parameters = useStore((s) => s.parameters)
@@ -18,8 +21,13 @@ export default function SimulationStrip() {
   const addMilestone = useStore((s) => s.addMilestone)
   const updateMilestone = useStore((s) => s.updateMilestone)
   const removeMilestone = useStore((s) => s.removeMilestone)
+  const events = useStore((s) => s.events)
+  const addEvent = useStore((s) => s.addEvent)
+  const updateEvent = useStore((s) => s.updateEvent)
+  const removeEvent = useStore((s) => s.removeEvent)
 
   const [modal, setModal] = useState(null) // {index?} | null
+  const [eventModal, setEventModal] = useState(null) // {index?} | null
 
   const adj = parameters.income_adjustment_pct
 
@@ -93,6 +101,13 @@ export default function SimulationStrip() {
         onChange={(v) => setParam('safety_floor', v)}
         format={money}
       />
+      {/* E3: drives the "real $" toggle on the macro chart. */}
+      <ParamChip
+        label="Inflation"
+        value={parameters.annual_inflation_pct}
+        onChange={(v) => setParam('annual_inflation_pct', v)}
+        format={(v) => `${v}%`}
+      />
 
       {/* Milestones */}
       <div className="flex items-center gap-2">
@@ -124,6 +139,42 @@ export default function SimulationStrip() {
         </button>
       </div>
 
+      {/* E2: income/expense change events */}
+      <div className="flex items-center gap-2">
+        {events.map((e, i) => (
+          <button
+            key={i}
+            onClick={() => setEventModal({ index: i })}
+            className="group flex items-center gap-1 rounded-full border border-edge bg-panel px-2.5 py-1 text-xs hover:border-violet-500"
+            title={`Edit ${e.label}`}
+          >
+            <span className={e.kind === 'income' ? 'text-emerald-400' : 'text-rose-400'}>
+              {e.kind === 'income' ? '↑' : '↓'}
+            </span>
+            <span className="truncate max-w-[120px] text-gray-300">{e.label}</span>
+            <span className="text-gray-400">
+              {e.mode === 'set' ? money(e.amount) : signedMoney(e.amount)}
+            </span>
+            <span className="text-gray-500">m{e.month}</span>
+            <span
+              onClick={(ev) => {
+                ev.stopPropagation()
+                removeEvent(i)
+              }}
+              className="ml-1 text-gray-600 group-hover:text-rose-400"
+            >
+              ✕
+            </span>
+          </button>
+        ))}
+        <button
+          onClick={() => setEventModal({})}
+          className="rounded-full border border-violet-700 bg-violet-950/40 px-3 py-1 text-xs font-medium text-violet-300 hover:bg-violet-900/40"
+        >
+          + Change event
+        </button>
+      </div>
+
       {/* Full-width natural-language scenario row */}
       <div className="w-full basis-full">
         <ScenarioInput />
@@ -137,6 +188,18 @@ export default function SimulationStrip() {
             if (modal.index != null) updateMilestone(modal.index, m)
             else addMilestone(m)
             setModal(null)
+          }}
+        />
+      )}
+
+      {eventModal && (
+        <EventModal
+          initial={eventModal.index != null ? events[eventModal.index] : null}
+          onClose={() => setEventModal(null)}
+          onSave={(e) => {
+            if (eventModal.index != null) updateEvent(eventModal.index, e)
+            else addEvent(e)
+            setEventModal(null)
           }}
         />
       )}

@@ -159,6 +159,20 @@ class Milestone(BaseModel):
     recurring_months: int = Field(0, ge=0)
     asset_value: float = 0.0
     debt_incurred: float = 0.0
+    # E1: annual interest rate for the loan behind `debt_incurred`. When set,
+    # the recurring payment is split into interest + principal (amortized).
+    # None falls back to the scenario's annual_debt_rate_pct.
+    apr: float | None = Field(default=None, ge=0, le=100)
+
+
+class ChangeEvent(BaseModel):
+    """E2: a step change to monthly income or expense from `month` onward."""
+
+    label: str = "Change"
+    month: int = Field(0, ge=0, description="Months from now the change takes effect")
+    kind: Literal["income", "expense"]
+    mode: Literal["set", "delta"] = "set"  # set = new absolute level; delta = +/-
+    amount: float = 0.0
 
 
 class SimulationParameters(BaseModel):
@@ -173,11 +187,14 @@ class SimulationParameters(BaseModel):
     annual_debt_rate_pct: float = 5.0
     starting_assets: float = 0.0
     starting_debt: float = 0.0
+    # E3: used to derive real (inflation-adjusted) net worth alongside nominal.
+    annual_inflation_pct: float = Field(0.0, ge=0, le=20)
 
 
 class SimulationRequest(BaseModel):
     parameters: SimulationParameters = Field(default_factory=SimulationParameters)
     milestones: list[Milestone] = Field(default_factory=list)
+    events: list[ChangeEvent] = Field(default_factory=list)
 
 
 class RunwayPoint(BaseModel):
@@ -191,6 +208,7 @@ class MacroPoint(BaseModel):
     total_assets: float
     remaining_debt: float
     net_worth: float
+    real_net_worth: float = 0.0  # E3: net worth in today's dollars
 
 
 class SimulationSeries(BaseModel):
@@ -204,6 +222,7 @@ class BranchBase(BaseModel):
     name: str
     parameters: SimulationParameters = Field(default_factory=SimulationParameters)
     milestones: list[Milestone] = Field(default_factory=list)
+    events: list[ChangeEvent] = Field(default_factory=list)
 
 
 class Branch(BranchBase):
@@ -220,6 +239,7 @@ class BranchUpdate(BaseModel):
     name: str | None = None
     parameters: SimulationParameters | None = None
     milestones: list[Milestone] | None = None
+    events: list[ChangeEvent] | None = None
 
 
 class CompareResult(BaseModel):
@@ -227,6 +247,62 @@ class CompareResult(BaseModel):
     branch: SimulationSeries
     base_branch_id: int
     branch_id: int
+
+
+# --- E4: multi-branch compare -------------------------------------------- #
+class CompareRequest(BaseModel):
+    branch_ids: list[int] = Field(default_factory=list)
+
+
+class ScenarioSeries(BaseModel):
+    branch_id: int
+    name: str
+    is_base: bool
+    series: SimulationSeries
+
+
+class DeltaCell(BaseModel):
+    branch_id: int
+    name: str
+    is_base: bool
+    cash: float | None = None        # runway cash at the checkpoint month
+    net_worth: float | None = None   # macro net worth at the checkpoint month
+    cash_delta: float | None = None  # vs. base (None for the base row)
+    net_delta: float | None = None
+
+
+class DeltaRow(BaseModel):
+    month: int
+    cells: list[DeltaCell]
+
+
+class MultiCompareResult(BaseModel):
+    scenarios: list[ScenarioSeries]
+    checkpoints: list[int]           # [12, 36, 72]
+    deltas: list[DeltaRow]
+
+
+# --- E5: goal tracking --------------------------------------------------- #
+class GoalBase(BaseModel):
+    label: str = Field(min_length=1, max_length=80)
+    kind: Literal["net_worth", "cash"]
+    target_amount: float
+    target_month: int = Field(ge=0, le=360)
+
+
+class Goal(GoalBase):
+    id: int
+
+
+class GoalCreate(GoalBase):
+    pass
+
+
+class GoalUpdate(BaseModel):
+    label: str | None = Field(default=None, min_length=1, max_length=80)
+    kind: Literal["net_worth", "cash"] | None = None
+    target_amount: float | None = None
+    target_month: int | None = Field(default=None, ge=0, le=360)
 
 
 # --------------------------------------------------------------------------- #

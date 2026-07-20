@@ -32,9 +32,13 @@ export const useStore = create((set, get) => ({
 
   parameters: { ...DEFAULT_PARAMS },
   milestones: [],
+  events: [], // E2: income/expense change events for the active plan
 
   series: null, // single simulation result
   compare: null, // { base, branch } when overlay is on
+  scenarioCompare: null, // E4: { scenarios, checkpoints, deltas }
+  compareBranchIds: [], // E4: branches selected for multi-overlay
+  goals: [], // E5: target net worth / cash records
   budget: null, // BudgetSummary: monthly spending + scenario impact
   trends: null, // TrendsSummary: month-over-month cash flow + category series
   budgetMonth: null, // null = all-time average; else "YYYY-MM"
@@ -55,6 +59,7 @@ export const useStore = create((set, get) => ({
       get().loadBranches(),
       get().pollLlm(),
       get().loadLlmConfig(),
+      get().loadGoals(),
     ])
     await get().recompute()
   },
@@ -142,7 +147,11 @@ export const useStore = create((set, get) => ({
     // Adopt the active branch's parameters into the editable strip.
     const active = branches.find((b) => b.id === (current ?? base?.id))
     if (active) {
-      set({ parameters: { ...DEFAULT_PARAMS, ...active.parameters }, milestones: active.milestones })
+      set({
+        parameters: { ...DEFAULT_PARAMS, ...active.parameters },
+        milestones: active.milestones,
+        events: active.events || [],
+      })
     }
   },
 
@@ -152,6 +161,7 @@ export const useStore = create((set, get) => ({
       activeBranchId: id,
       parameters: branch ? { ...DEFAULT_PARAMS, ...branch.parameters } : get().parameters,
       milestones: branch ? branch.milestones : get().milestones,
+      events: branch ? branch.events || [] : get().events,
     })
     get().recompute()
   },
@@ -194,7 +204,7 @@ export const useStore = create((set, get) => ({
   // Persist edits to the active plan. The Base Plan is editable too — it holds
   // your real baseline (income, spending, assets); only deletion is blocked.
   async persistActiveBranch() {
-    const { activeBranchId, branches, parameters, milestones } = get()
+    const { activeBranchId, branches, parameters, milestones, events } = get()
     const active = branches.find((b) => b.id === activeBranchId)
     if (!active) {
       set({ branchSaveState: 'idle' })
@@ -202,17 +212,38 @@ export const useStore = create((set, get) => ({
     }
     set({ branchSaveState: 'saving' })
     try {
-      await api.updateBranch(activeBranchId, { parameters, milestones })
+      await api.updateBranch(activeBranchId, { parameters, milestones, events })
       // Keep the in-memory branch in sync so switching away and back is correct.
       set({
         branchSaveState: 'saved',
         branches: get().branches.map((b) =>
-          b.id === activeBranchId ? { ...b, parameters, milestones } : b,
+          b.id === activeBranchId ? { ...b, parameters, milestones, events } : b,
         ),
       })
     } catch {
       set({ branchSaveState: 'idle' }) // non-fatal: keep local edits
     }
+  },
+
+  // ---- E2: income/expense change events (mirror milestone handling) ---- //
+  addEvent(ev) {
+    set({ events: [...get().events, ev] })
+    get().recompute()
+    get().persistActiveBranch()
+  },
+
+  updateEvent(index, ev) {
+    const next = get().events.slice()
+    next[index] = ev
+    set({ events: next })
+    get().recompute()
+    get().persistActiveBranch()
+  },
+
+  removeEvent(index) {
+    set({ events: get().events.filter((_, i) => i !== index) })
+    get().recompute()
+    get().persistActiveBranch()
   },
 
   // ---- branch management ---- //
@@ -226,7 +257,10 @@ export const useStore = create((set, get) => ({
   async deleteBranch(id) {
     await api.deleteBranch(id)
     const base = get().branches.find((b) => b.is_base)
-    set({ activeBranchId: base?.id ?? null })
+    set({
+      activeBranchId: base?.id ?? null,
+      compareBranchIds: get().compareBranchIds.filter((x) => x !== id),
+    })
     await get().loadBranches()
     get().recompute()
   },
@@ -250,7 +284,7 @@ export const useStore = create((set, get) => ({
   },
 
   async recompute() {
-    const { parameters, milestones, overlay, activeBranchId, branches } = get()
+    const { parameters, milestones, events, overlay, activeBranchId, branches } = get()
     const active = branches.find((b) => b.id === activeBranchId)
     // Forecast (runway + macro) and budget update together off the same inputs.
     await Promise.all([
@@ -259,12 +293,58 @@ export const useStore = create((set, get) => ({
           const cmp = await api.compare(activeBranchId)
           set({ compare: cmp, series: cmp.branch })
         } else {
-          const series = await api.simulate(parameters, milestones)
+          const series = await api.simulate(parameters, milestones, events)
           set({ series, compare: null })
         }
       })(),
       get().loadBudget(),
+      get().loadScenarioCompare(),
     ])
+  },
+
+  // ---- E4: multi-branch compare ---- //
+  toggleCompareBranch(id) {
+    const cur = get().compareBranchIds
+    const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]
+    set({ compareBranchIds: next })
+    get().loadScenarioCompare()
+  },
+
+  async loadScenarioCompare() {
+    const ids = get().compareBranchIds
+    if (ids.length === 0) {
+      set({ scenarioCompare: null })
+      return
+    }
+    try {
+      set({ scenarioCompare: await api.compareScenarios(ids) })
+    } catch {
+      /* non-fatal */
+    }
+  },
+
+  // ---- E5: goals ---- //
+  async loadGoals() {
+    try {
+      set({ goals: await api.goals() })
+    } catch {
+      /* backend not ready */
+    }
+  },
+
+  async createGoal(goal) {
+    await api.createGoal(goal)
+    await get().loadGoals()
+  },
+
+  async updateGoal(id, patch) {
+    await api.updateGoal(id, patch)
+    await get().loadGoals()
+  },
+
+  async deleteGoal(id) {
+    await api.deleteGoal(id)
+    await get().loadGoals()
   },
 
   async loadBudget() {
@@ -479,6 +559,8 @@ export const useStore = create((set, get) => ({
       activeBranchId: baseId,
       overlay: false,
       importSummary: null,
+      compareBranchIds: [],
+      scenarioCompare: null,
     })
     await Promise.all([get().loadBranches(), get().loadTransactions()])
     await get().recompute()

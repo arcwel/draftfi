@@ -1,5 +1,6 @@
 import Dropzone from '../components/Dropzone'
 import BranchManager from '../components/BranchManager'
+import GoalTracker from '../components/GoalTracker'
 import LLMConfigPanel from '../components/LLMConfigPanel'
 import DataTools from '../components/DataTools'
 
@@ -23,6 +24,9 @@ export default function Sidebar() {
       </Section>
       <Section title="Plans & Branches">
         <BranchManager />
+      </Section>
+      <Section title="Goals">
+        <GoalTracker />
       </Section>
       <Section title="LLM Provider">
         <LLMConfigPanel />

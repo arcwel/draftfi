@@ -133,12 +133,39 @@ export const api = {
 
   importStatus: (jobId) => request(`/import/status/${jobId}`),
 
-  simulate: (parameters, milestones) =>
+  simulate: (parameters, milestones, events = []) =>
     request('/simulate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ parameters, milestones }),
+      body: JSON.stringify({ parameters, milestones, events }),
     }),
+
+  // E4: overlay Base + selected branches with a delta table.
+  compareScenarios: (branchIds) =>
+    request('/scenarios/compare', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ branch_ids: branchIds }),
+    }),
+
+  // E5: goal CRUD.
+  goals: () => request('/goals'),
+
+  createGoal: (goal) =>
+    request('/goals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(goal),
+    }),
+
+  updateGoal: (id, patch) =>
+    request(`/goals/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+
+  deleteGoal: (id) => request(`/goals/${id}`, { method: 'DELETE' }),
 
   budget: (parameters, milestones, month) =>
     request('/budget', {

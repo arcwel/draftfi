@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react'
+import { memo, useMemo, useState } from 'react'
 import {
   Area,
   ComposedChart,
@@ -19,19 +19,27 @@ const money = (n) =>
 
 // Chart B — Macro Wealth (PRD 5.2). Stacked assets-over-debt; dashed base line.
 function MacroChart({ series, compare }) {
+  // E3: toggle nominal vs. inflation-adjusted (today's dollars) net worth.
+  const [real, setReal] = useState(false)
+
   const data = useMemo(() => {
     if (!series) return []
     const baseByYear = compare
-      ? Object.fromEntries(compare.base.macro.map((p) => [p.year, p.net_worth]))
+      ? Object.fromEntries(
+          compare.base.macro.map((p) => [
+            p.year,
+            real ? p.real_net_worth : p.net_worth,
+          ]),
+        )
       : null
     return series.macro.map((p) => ({
       year: p.year,
       assets: p.total_assets,
       debt: p.remaining_debt,
-      net: p.net_worth,
+      net: real ? p.real_net_worth : p.net_worth,
       baseNet: baseByYear ? baseByYear[p.year] : null,
     }))
-  }, [series, compare])
+  }, [series, compare, real])
 
   if (!series) return null
 
@@ -43,13 +51,26 @@ function MacroChart({ series, compare }) {
         <h3 className="text-sm font-semibold text-white">
           Macro Wealth
           <span className="ml-2 text-[11px] font-normal text-gray-500">
-            {series.macro.length - 1} years
+            {series.macro.length - 1} years{real ? " · today's $" : ''}
           </span>
         </h3>
-        <span className="text-xs text-gray-400">
-          Net worth in yr {series.macro.length - 1}:{' '}
-          <span className="font-medium text-emerald-400">{money(finalNet)}</span>
-        </span>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setReal((v) => !v)}
+            className={`rounded px-1.5 py-0.5 text-[10px] ${
+              real
+                ? 'bg-sky-600 text-white'
+                : 'border border-edge text-gray-400 hover:text-gray-200'
+            }`}
+            title="Show net worth in today's dollars (inflation-adjusted)"
+          >
+            Real $
+          </button>
+          <span className="text-xs text-gray-400">
+            Net worth in yr {series.macro.length - 1}:{' '}
+            <span className="font-medium text-emerald-400">{money(finalNet)}</span>
+          </span>
+        </div>
       </div>
 
       <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-gray-400">

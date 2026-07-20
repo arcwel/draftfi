@@ -140,6 +140,74 @@ def test_compare_returns_base_and_branch(client):
     assert len(body["branch"]["runway"]) == 25
 
 
+def test_branch_persists_change_events(client):
+    """E2: change events round-trip through branch storage."""
+    branch = client.post("/branches", json={"name": "Raise"}).json()
+    r = client.patch(
+        f"/branches/{branch['id']}",
+        json={
+            "events": [
+                {"label": "Promotion", "kind": "income", "mode": "set",
+                 "amount": 8000, "month": 6}
+            ]
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["events"][0]["amount"] == 8000
+    # Re-fetch to confirm persistence.
+    reload = next(b for b in client.get("/branches").json() if b["id"] == branch["id"])
+    assert reload["events"][0]["label"] == "Promotion"
+
+
+def test_scenarios_compare_delta_table(client):
+    """E4: base + branches overlay with a delta table anchored on the base."""
+    base = next(b for b in client.get("/branches").json() if b["is_base"])
+    client.patch(
+        f"/branches/{base['id']}",
+        json={"parameters": {"starting_cash": 1000, "monthly_inflow": 100,
+                             "monthly_outflow": 100, "runway_months": 72}},
+    )
+    branch = client.post("/branches", json={"name": "Save More"}).json()
+    client.patch(
+        f"/branches/{branch['id']}",
+        json={"parameters": {"starting_cash": 1000, "monthly_inflow": 300,
+                             "monthly_outflow": 100, "runway_months": 72}},
+    )
+    r = client.post("/scenarios/compare", json={"branch_ids": [branch["id"]]})
+    assert r.status_code == 200
+    body = r.json()
+    # Base is always first; requested branch follows.
+    assert body["scenarios"][0]["is_base"] is True
+    assert len(body["scenarios"]) == 2
+    assert body["checkpoints"] == [12, 36, 72]
+    # At month 12 the higher-income branch beats the flat base.
+    row12 = next(d for d in body["deltas"] if d["month"] == 12)
+    branch_cell = next(c for c in row12["cells"] if not c["is_base"])
+    assert branch_cell["cash_delta"] > 0
+
+
+def test_goals_crud_and_validation(client):
+    """E5: goal create / list / update / delete."""
+    created = client.post(
+        "/goals",
+        json={"label": "House down payment", "kind": "cash",
+              "target_amount": 40000, "target_month": 24},
+    )
+    assert created.status_code == 201
+    goal = created.json()
+    assert goal["kind"] == "cash"
+
+    assert len(client.get("/goals").json()) == 1
+
+    upd = client.patch(f"/goals/{goal['id']}", json={"target_amount": 50000})
+    assert upd.status_code == 200
+    assert upd.json()["target_amount"] == 50000
+
+    assert client.delete(f"/goals/{goal['id']}").status_code == 204
+    assert client.get("/goals").json() == []
+    assert client.patch(f"/goals/{goal['id']}", json={"label": "x"}).status_code == 404
+
+
 def test_import_and_override_flow(client, monkeypatch):
     # Force graceful-degradation path so the test needs no live LLM.
     from app.services import llm

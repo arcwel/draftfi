@@ -497,6 +497,7 @@ def _decode_branch(row: dict[str, Any]) -> dict[str, Any]:
     row = dict(row)
     row["parameters"] = json.loads(row.get("parameters") or "{}")
     row["milestones"] = json.loads(row.get("milestones") or "[]")
+    row["events"] = json.loads(row.get("events") or "[]")
     row["is_base"] = bool(row.get("is_base"))
     return row
 
@@ -524,11 +525,18 @@ def create_branch(
     parameters: dict[str, Any],
     milestones: list[dict[str, Any]],
     is_base: bool = False,
+    events: list[dict[str, Any]] | None = None,
 ) -> int:
     cur = conn.execute(
-        "INSERT INTO branches (name, is_base, parameters, milestones) "
-        "VALUES (?, ?, ?, ?)",
-        (name, 1 if is_base else 0, json.dumps(parameters), json.dumps(milestones)),
+        "INSERT INTO branches (name, is_base, parameters, milestones, events) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (
+            name,
+            1 if is_base else 0,
+            json.dumps(parameters),
+            json.dumps(milestones),
+            json.dumps(events or []),
+        ),
     )
     return int(cur.lastrowid)
 
@@ -539,6 +547,7 @@ def update_branch(
     name: str | None = None,
     parameters: dict[str, Any] | None = None,
     milestones: list[dict[str, Any]] | None = None,
+    events: list[dict[str, Any]] | None = None,
 ) -> None:
     fields, values = [], []
     if name is not None:
@@ -550,6 +559,9 @@ def update_branch(
     if milestones is not None:
         fields.append("milestones = ?")
         values.append(json.dumps(milestones))
+    if events is not None:
+        fields.append("events = ?")
+        values.append(json.dumps(events))
     if not fields:
         return
     values.append(branch_id)
@@ -558,6 +570,54 @@ def update_branch(
 
 def delete_branch(conn: sqlite3.Connection, branch_id: int) -> None:
     conn.execute("DELETE FROM branches WHERE id = ? AND is_base = 0", (branch_id,))
+
+
+# --------------------------------------------------------------------------- #
+# Goals (target net worth / cash by a future month)
+# --------------------------------------------------------------------------- #
+def list_goals(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT id, label, kind, target_amount, target_month FROM goals "
+        "ORDER BY target_month ASC, id ASC"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def create_goal(
+    conn: sqlite3.Connection,
+    label: str,
+    kind: str,
+    target_amount: float,
+    target_month: int,
+) -> int:
+    cur = conn.execute(
+        "INSERT INTO goals (label, kind, target_amount, target_month) "
+        "VALUES (?, ?, ?, ?)",
+        (label, kind, target_amount, target_month),
+    )
+    return int(cur.lastrowid)
+
+
+def get_goal(conn: sqlite3.Connection, goal_id: int) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT id, label, kind, target_amount, target_month FROM goals WHERE id = ?",
+        (goal_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def update_goal(conn: sqlite3.Connection, goal_id: int, **fields: Any) -> None:
+    cols = [k for k, v in fields.items() if v is not None]
+    if not cols:
+        return
+    assignments = ", ".join(f"{c} = ?" for c in cols)
+    values = [fields[c] for c in cols]
+    values.append(goal_id)
+    conn.execute(f"UPDATE goals SET {assignments} WHERE id = ?", values)
+
+
+def delete_goal(conn: sqlite3.Connection, goal_id: int) -> None:
+    conn.execute("DELETE FROM goals WHERE id = ?", (goal_id,))
 
 
 # --------------------------------------------------------------------------- #

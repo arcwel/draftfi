@@ -122,6 +122,24 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         ALTER TABLE categories ADD COLUMN budget_rollover INTEGER NOT NULL DEFAULT 0;
         """,
     ),
+    (
+        7,
+        "simulation engine: income/expense change events + goal tracking",
+        """
+        -- E2: step changes to monthly income/expense per branch.
+        ALTER TABLE branches ADD COLUMN events TEXT NOT NULL DEFAULT '[]';
+
+        -- E5: target net worth / cash by a future month.
+        CREATE TABLE IF NOT EXISTS goals (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            label         TEXT NOT NULL,
+            kind          TEXT NOT NULL,          -- 'net_worth' | 'cash'
+            target_amount REAL NOT NULL,
+            target_month  INTEGER NOT NULL,       -- months from now
+            created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        """,
+    ),
 ]
 
 # Default budget categories with visualization colors (Tailwind-ish hexes).

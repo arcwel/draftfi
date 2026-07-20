@@ -8,6 +8,7 @@ const EMPTY = {
   recurring_months: 0,
   asset_value: 0,
   debt_incurred: 0,
+  apr: null,
 }
 
 function Field({ label, hint, children }) {
@@ -98,6 +99,20 @@ export default function MilestoneModal({ initial, onSave, onClose }) {
               className={input}
               value={m.debt_incurred}
               onChange={(e) => setM({ ...m, debt_incurred: num(e.target.value) })}
+            />
+          </Field>
+          {/* E1: when set, the recurring payment amortizes at this rate. */}
+          <Field label="Loan APR %" hint="blank = use default debt rate">
+            <input
+              type="number"
+              min="0"
+              step="0.1"
+              placeholder="auto"
+              className={input}
+              value={m.apr ?? ''}
+              onChange={(e) =>
+                setM({ ...m, apr: e.target.value === '' ? null : Number(e.target.value) })
+              }
             />
           </Field>
         </div>

@@ -3,6 +3,7 @@ import RunwayChart from '../components/RunwayChart'
 import MacroChart from '../components/MacroChart'
 import BudgetPanel from '../components/BudgetPanel'
 import CashflowChart from '../components/CashflowChart'
+import ScenarioCompare from '../components/ScenarioCompare'
 
 const HORIZONS = [12, 24, 36, 48, 60, 72]
 
@@ -48,6 +49,8 @@ export default function Charts() {
       <div className="rounded-xl border border-edge bg-panel/60 p-3">
         <MacroChart series={series} compare={compare} />
       </div>
+
+      <ScenarioCompare />
     </div>
   )
 }

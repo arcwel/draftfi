@@ -15,6 +15,7 @@ from app.api import (
     budget,
     data,
     export,
+    goals,
     imports,
     llm_status,
     scenario,
@@ -72,6 +73,7 @@ def create_app() -> FastAPI:
     app.include_router(llm_status.router)
     app.include_router(simulation.router)
     app.include_router(budget.router)
+    app.include_router(goals.router)
     app.include_router(data.router)
     app.include_router(scenario.router)
     app.include_router(export.router)
