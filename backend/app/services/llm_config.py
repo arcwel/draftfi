@@ -143,5 +143,10 @@ def has_key(conn: sqlite3.Connection, provider: str) -> bool:
     return bool(repo.get_setting(conn, _key_setting(provider)))
 
 
+def get_key(conn: sqlite3.Connection, provider: str) -> str | None:
+    """Return the stored API key for a provider (or None)."""
+    return repo.get_setting(conn, _key_setting(provider))
+
+
 def clear_key(conn: sqlite3.Connection, provider: str) -> None:
     repo.set_setting(conn, _key_setting(provider), None)

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../store/useStore'
+import { api } from '../lib/api'
 
 const inputCls =
   'w-full rounded-md border border-edge bg-ink px-2 py-1 text-xs text-gray-100 focus:border-sky-500 focus:outline-none'
@@ -18,6 +19,12 @@ export default function LLMConfigPanel() {
   const [keyInput, setKeyInput] = useState('')
   const [editingKey, setEditingKey] = useState(false)
   const [savedFlash, setSavedFlash] = useState(false)
+  // A1 test-connection + A2 model-list local state.
+  const [testResult, setTestResult] = useState(null) // {ok, latency_ms, detail}
+  const [testing, setTesting] = useState(false)
+  const [models, setModels] = useState([])
+  const [loadingModels, setLoadingModels] = useState(false)
+  const [modelsError, setModelsError] = useState(null)
 
   const specs = config?.providers ?? []
   const active = specs.find((p) => p.id === provider)
@@ -41,6 +48,10 @@ export default function LLMConfigPanel() {
     }
     setKeyInput('')
     setEditingKey(false)
+    // Reset per-provider transient UI.
+    setTestResult(null)
+    setModels([])
+    setModelsError(null)
   }, [provider, config])
 
   if (!config) {
@@ -51,14 +62,46 @@ export default function LLMConfigPanel() {
   const hasKey = active?.has_key
   const online = llm.available
 
+  // Current (unsaved) form values for test / model-fetch.
+  function draftConfig() {
+    const c = { provider, model, base_url: baseUrl }
+    if (keyInput.trim()) c.api_key = keyInput.trim()
+    return c
+  }
+
   async function onSave() {
-    const payload = { provider, model, base_url: baseUrl }
-    if (keyInput.trim()) payload.api_key = keyInput.trim()
+    const payload = draftConfig()
     await saveLlmConfig(payload)
     setKeyInput('')
     setEditingKey(false)
     setSavedFlash(true)
     setTimeout(() => setSavedFlash(false), 1500)
+  }
+
+  async function onTest() {
+    setTesting(true)
+    setTestResult(null)
+    try {
+      setTestResult(await api.testLlm(draftConfig()))
+    } catch (e) {
+      setTestResult({ ok: false, detail: e.message })
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  async function onLoadModels() {
+    setLoadingModels(true)
+    setModelsError(null)
+    try {
+      const res = await api.llmModels(draftConfig())
+      setModels(res.models)
+      if (res.models.length === 0) setModelsError(res.detail || 'No models found')
+    } catch (e) {
+      setModelsError(e.message)
+    } finally {
+      setLoadingModels(false)
+    }
   }
 
   return (
@@ -102,15 +145,39 @@ export default function LLMConfigPanel() {
         </select>
       </label>
 
-      {/* Model */}
+      {/* Model — free text with a live picker (A2). */}
       <label className="block">
-        <span className="text-[11px] text-gray-500">Model</span>
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-gray-500">Model</span>
+          <button
+            type="button"
+            onClick={onLoadModels}
+            disabled={loadingModels}
+            className="text-[10px] text-sky-300 hover:text-sky-200 disabled:opacity-50"
+          >
+            {loadingModels ? 'Loading…' : '↻ Load models'}
+          </button>
+        </div>
         <input
           className={inputCls}
           value={model}
+          list="llm-model-options"
           placeholder={active?.model_hint}
           onChange={(e) => setModel(e.target.value)}
         />
+        <datalist id="llm-model-options">
+          {models.map((m) => (
+            <option key={m} value={m} />
+          ))}
+        </datalist>
+        {models.length > 0 && (
+          <span className="mt-0.5 block text-[10px] text-gray-600">
+            {models.length} models available — type or pick from the list
+          </span>
+        )}
+        {modelsError && (
+          <span className="mt-0.5 block text-[10px] text-amber-400">{modelsError}</span>
+        )}
       </label>
 
       {/* Base URL — only meaningful for local providers */}
@@ -164,13 +231,37 @@ export default function LLMConfigPanel() {
         </div>
       )}
 
-      <button
-        onClick={onSave}
-        disabled={saving}
-        className="w-full rounded-md bg-sky-600 py-1.5 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-50"
-      >
-        {saving ? 'Saving…' : savedFlash ? 'Saved ✓' : 'Save configuration'}
-      </button>
+      {/* A1: test-connection result */}
+      {testResult && (
+        <div
+          className={`rounded-md border px-2 py-1 text-[11px] ${
+            testResult.ok
+              ? 'border-emerald-800 bg-emerald-950/40 text-emerald-300'
+              : 'border-rose-900 bg-rose-950/40 text-rose-300'
+          }`}
+        >
+          {testResult.ok
+            ? `✓ Connected${testResult.latency_ms != null ? ` · ${testResult.latency_ms} ms` : ''}`
+            : `✕ ${testResult.detail || 'Connection failed'}`}
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        <button
+          onClick={onTest}
+          disabled={testing}
+          className="flex-1 rounded-md border border-edge py-1.5 text-xs font-medium text-gray-200 hover:border-sky-500 disabled:opacity-50"
+        >
+          {testing ? 'Testing…' : 'Test connection'}
+        </button>
+        <button
+          onClick={onSave}
+          disabled={saving}
+          className="flex-1 rounded-md bg-sky-600 py-1.5 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+        >
+          {saving ? 'Saving…' : savedFlash ? 'Saved ✓' : 'Save configuration'}
+        </button>
+      </div>
     </div>
   )
 }

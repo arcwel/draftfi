@@ -36,6 +36,28 @@ export const api = {
   deleteLlmKey: (provider) =>
     request(`/llm/config/${provider}/key`, { method: 'DELETE' }),
 
+  // A1: validate a provider config on demand (without saving).
+  testLlm: (config) =>
+    request('/llm/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    }),
+
+  // A2: fetch the provider's live model list.
+  llmModels: (config) =>
+    request('/llm/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    }),
+
+  // A3/A4: recurring charges + month-over-month insights.
+  subscriptions: () => request('/subscriptions'),
+  insights: () => request('/insights'),
+  insightsNarrative: () =>
+    request('/insights/narrative', { method: 'POST' }),
+
   categories: () => request('/categories'),
 
   transactions: ({ limit = 50, offset = 0, q, sort_by, sort_dir } = {}) => {

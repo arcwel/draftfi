@@ -3,6 +3,7 @@ import RunwayChart from '../components/RunwayChart'
 import MacroChart from '../components/MacroChart'
 import BudgetPanel from '../components/BudgetPanel'
 import CashflowChart from '../components/CashflowChart'
+import InsightsCard from '../components/InsightsCard'
 import ScenarioCompare from '../components/ScenarioCompare'
 
 const HORIZONS = [12, 24, 36, 48, 60, 72]
@@ -26,6 +27,8 @@ export default function Charts() {
         selectedMonth={budgetMonth}
         onSelectMonth={setBudgetMonth}
       />
+
+      <InsightsCard />
 
       <div className="rounded-xl border border-edge bg-panel/60 p-3">
         <div className="mb-1 flex justify-end gap-1">

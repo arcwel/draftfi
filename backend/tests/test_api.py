@@ -241,3 +241,54 @@ def test_import_and_override_flow(client, monkeypatch):
     assert patched.status_code == 200
     assert patched.json()["category_name"] == "Entertainment"
     assert patched.json()["resolution"] == "override"
+
+
+# --------------------------------------------------------------------------- #
+# Batch A — LLM provider surface (A1/A2) + analytics endpoints (A3/A4)
+# --------------------------------------------------------------------------- #
+def test_llm_test_unknown_provider_400(client):
+    r = client.post("/llm/test", json={"provider": "bogus"})
+    assert r.status_code == 400
+
+
+def test_llm_test_unreachable_returns_not_ok(client):
+    # A1: a dead endpoint reports ok=false with a detail, not an exception.
+    r = client.post(
+        "/llm/test",
+        json={"provider": "ollama", "base_url": "http://127.0.0.1:1"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is False
+    assert body["detail"]
+
+
+def test_llm_models_unreachable_returns_empty(client):
+    # A2: unreachable provider -> empty list + detail (client falls back to text).
+    r = client.post(
+        "/llm/models",
+        json={"provider": "ollama", "base_url": "http://127.0.0.1:1"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["models"] == []
+    assert body["detail"]
+
+
+def test_subscriptions_and_insights_smoke(client):
+    # A3/A4: endpoints respond with empty structures on an empty database.
+    subs = client.get("/subscriptions")
+    assert subs.status_code == 200
+    assert subs.json() == {"items": [], "total_monthly": 0.0}
+
+    ins = client.get("/insights")
+    assert ins.status_code == 200
+    assert ins.json() == {"insights": []}
+
+
+def test_narrative_empty_history_is_graceful(client):
+    # A4: with no history there are no insights, so the narrative short-circuits
+    # to a friendly message without needing a provider (no 500).
+    r = client.post("/insights/narrative")
+    assert r.status_code == 200
+    assert "history" in r.json()["narrative"].lower()

@@ -131,3 +131,16 @@ async def test_health_requires_key_for_cloud_provider():
     available, latency, detail = await llm.health(cfg)
     assert available is False
     assert "key" in (detail or "").lower()
+
+
+def test_redact_strips_api_key_from_error_text():
+    # A Gemini-style URL carrying the key in the query string must be scrubbed
+    # so it can never surface in a UI error or log line (Batch A hardening).
+    raw = (
+        "Client error '429' for url "
+        "'https://generativelanguage.googleapis.com/v1beta/models/"
+        "gemini-2.0-flash:generateContent?key=AQ.Ab8RN6secretVALUE'"
+    )
+    cleaned = llm._redact(raw)
+    assert "AQ.Ab8RN6secretVALUE" not in cleaned
+    assert "key=REDACTED" in cleaned

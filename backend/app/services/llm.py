@@ -47,6 +47,16 @@ class LLMError(Exception):
     """Raised when the model is unreachable or returns unusable output."""
 
 
+# Providers such as Gemini carry the API key in the URL query string, which
+# httpx echoes verbatim in its error messages. Redact it before any detail can
+# reach the frontend or logs.
+_KEY_IN_URL_RE = re.compile(r"([?&]key=)[^&\s'\"]+")
+
+
+def _redact(text: str) -> str:
+    return _KEY_IN_URL_RE.sub(r"\1REDACTED", text)
+
+
 def parse_model_json(text: str) -> CleanResult:
     """Extract ``{clean_merchant, category}`` from possibly-noisy model output."""
     candidate = text.strip()
@@ -111,9 +121,62 @@ async def health(config: LLMConfig) -> tuple[bool, float | None, str | None]:
         detail = "invalid API key" if code in (401, 403) else f"HTTP {code}"
         return False, None, detail
     except httpx.HTTPError as exc:
-        return False, None, str(exc)
+        return False, None, _redact(str(exc))
     latency_ms = (time.perf_counter() - start) * 1000.0
     return True, round(latency_ms, 1), None
+
+
+# --------------------------------------------------------------------------- #
+# Model discovery (per provider) — A2
+# --------------------------------------------------------------------------- #
+async def list_models(config: LLMConfig) -> list[str]:
+    """Return the provider's available model ids, sorted.
+
+    Raises :class:`LLMError` when the endpoint is unreachable or the key is
+    rejected, so the caller can fall back to free-text entry.
+    """
+    if config.spec.requires_key and not config.api_key:
+        raise LLMError("no API key configured")
+    base = config.base_url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            if config.provider == "ollama":
+                resp = await client.get(f"{base}/api/tags")
+                resp.raise_for_status()
+                names = [m["name"] for m in resp.json().get("models", [])]
+            elif config.provider == "openai":
+                resp = await client.get(
+                    f"{base}/models",
+                    headers={"Authorization": f"Bearer {config.api_key}"},
+                )
+                resp.raise_for_status()
+                names = [m["id"] for m in resp.json().get("data", [])]
+            elif config.provider == "gemini":
+                resp = await client.get(
+                    f"{base}/models", params={"key": config.api_key}
+                )
+                resp.raise_for_status()
+                # Gemini ids look like "models/gemini-2.0-flash"; strip the prefix.
+                names = [
+                    m["name"].split("/", 1)[-1]
+                    for m in resp.json().get("models", [])
+                    if "generateContent" in m.get("supportedGenerationMethods", [])
+                ]
+            elif config.provider == "anthropic":
+                resp = await client.get(
+                    f"{base}/v1/models", headers=_anthropic_headers(config)
+                )
+                resp.raise_for_status()
+                names = [m["id"] for m in resp.json().get("data", [])]
+            else:  # pragma: no cover - guarded by config resolution
+                raise LLMError(f"unknown provider {config.provider}")
+    except httpx.HTTPStatusError as exc:
+        code = exc.response.status_code
+        detail = "invalid API key" if code in (401, 403) else f"HTTP {code}"
+        raise LLMError(detail) from exc
+    except httpx.HTTPError as exc:
+        raise LLMError(_redact(str(exc))) from exc
+    return sorted(set(names))
 
 
 # --------------------------------------------------------------------------- #
@@ -264,7 +327,7 @@ async def clean_merchants_batch(
     try:
         text = await _generate(config, prompt, system)
     except httpx.HTTPError as exc:
-        raise LLMError(f"LLM endpoint error: {exc}") from exc
+        raise LLMError(_redact(f"LLM endpoint error: {exc}")) from exc
     return parse_batch_json(text, len(raw_descriptions))
 
 
@@ -277,7 +340,7 @@ async def generate_json(config: LLMConfig, system: str, prompt: str) -> dict:
     try:
         text = await _generate(config, prompt, system)
     except httpx.HTTPError as exc:
-        raise LLMError(f"LLM endpoint error: {exc}") from exc
+        raise LLMError(_redact(f"LLM endpoint error: {exc}")) from exc
     candidate = text.strip()
     if candidate.startswith("```"):
         candidate = candidate.strip("`")
@@ -317,7 +380,7 @@ async def clean_merchant(
             text = await _generate(config, prompt, system)
             return parse_model_json(text)
         except httpx.HTTPError as exc:
-            raise LLMError(f"LLM endpoint error: {exc}") from exc
+            raise LLMError(_redact(f"LLM endpoint error: {exc}")) from exc
         except LLMError as exc:
             last_exc = exc
             continue

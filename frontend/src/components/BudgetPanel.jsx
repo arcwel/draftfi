@@ -26,6 +26,8 @@ export default function BudgetPanel() {
   const budgetMonth = useStore((s) => s.budgetMonth)
   const setBudgetMonth = useStore((s) => s.setBudgetMonth)
   const setCategoryBudget = useStore((s) => s.setCategoryBudget)
+  const subscriptions = useStore((s) => s.subscriptions)
+  const [showSubs, setShowSubs] = useState(false)
 
   if (!budget) {
     return (
@@ -86,6 +88,48 @@ export default function BudgetPanel() {
           tone={budget.total_monthly_net >= 0 ? 'pos' : 'neg'}
         />
       </div>
+
+      {/* A3: recurring-charge (subscription) detection */}
+      {subscriptions && subscriptions.items.length > 0 && (
+        <div className="mb-3">
+          <button
+            onClick={() => setShowSubs((v) => !v)}
+            className="flex w-full items-center gap-2 rounded-lg border border-violet-900 bg-violet-950/30 px-2.5 py-1.5 text-xs text-violet-200 hover:bg-violet-950/50"
+          >
+            <span>🔁</span>
+            <span className="font-medium">
+              Subscriptions: {money(subscriptions.total_monthly)}/mo
+            </span>
+            <span className="text-violet-400/70">
+              {subscriptions.items.filter((s) => s.active).length} active
+            </span>
+            <span className="ml-auto text-violet-400">{showSubs ? '▾' : '▸'}</span>
+          </button>
+          {showSubs && (
+            <div className="mt-1 space-y-0.5 rounded-lg border border-edge bg-ink/40 p-2">
+              {subscriptions.items.map((s, i) => (
+                <div
+                  key={`${s.merchant}-${i}`}
+                  className={`flex items-center justify-between text-[11px] ${s.active ? 'text-gray-300' : 'text-gray-600'}`}
+                >
+                  <span className="flex items-center gap-1.5 truncate">
+                    <span
+                      className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+                      style={{ background: s.color }}
+                    />
+                    <span className="truncate">{s.merchant}</span>
+                    <span className="text-gray-600">· {s.cadence}</span>
+                    {!s.active && <span className="text-gray-700">(inactive)</span>}
+                  </span>
+                  <span className="shrink-0 tabular-nums">
+                    {money(s.monthly_cost)}/mo
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Scenario impact */}
       {scenarioActive && (

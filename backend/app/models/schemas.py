@@ -138,6 +138,19 @@ class LLMConfigIn(BaseModel):
     api_key: str | None = None
 
 
+# A1: on-demand connection test result.
+class LLMTestResult(BaseModel):
+    ok: bool
+    latency_ms: float | None = None
+    detail: str | None = None
+
+
+# A2: live model list for the picker (with free-text fallback on the client).
+class LLMModelsResult(BaseModel):
+    models: list[str] = Field(default_factory=list)
+    detail: str | None = None
+
+
 # --------------------------------------------------------------------------- #
 # Simulation
 # --------------------------------------------------------------------------- #
@@ -403,3 +416,38 @@ class ScenarioParseResult(BaseModel):
     # Partial SimulationParameters overrides (only keys the text implied).
     parameters: dict = Field(default_factory=dict)
     note: str | None = None
+
+
+# --------------------------------------------------------------------------- #
+# Subscriptions (A3) + insights (A4)
+# --------------------------------------------------------------------------- #
+class Subscription(BaseModel):
+    merchant: str
+    category: str
+    color: str
+    cadence: str                # weekly | biweekly | monthly | quarterly | annual
+    amount: float               # typical charge
+    monthly_cost: float         # normalized to a monthly figure
+    occurrences: int
+    last_charge: str
+    active: bool                # recent enough to still be running
+
+
+class SubscriptionsSummary(BaseModel):
+    items: list[Subscription] = Field(default_factory=list)
+    total_monthly: float = 0.0  # sum of active subscriptions only
+
+
+class Insight(BaseModel):
+    month: str
+    text: str
+    kind: str                   # warn (spend up) | good (spend down) | up | down
+    category: str | None = None
+
+
+class InsightsList(BaseModel):
+    insights: list[Insight] = Field(default_factory=list)
+
+
+class NarrativeResult(BaseModel):
+    narrative: str

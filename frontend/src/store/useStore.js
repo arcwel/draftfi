@@ -40,6 +40,8 @@ export const useStore = create((set, get) => ({
   scenarioCompare: null, // E4: { scenarios, checkpoints, deltas }
   compareBranchIds: [], // E4: branches selected for multi-overlay
   goals: [], // E5: target net worth / cash records
+  subscriptions: null, // A3: { items, total_monthly }
+  insights: [], // A4: heuristic month-over-month insights
   budget: null, // BudgetSummary: monthly spending + scenario impact
   trends: null, // TrendsSummary: month-over-month cash flow + category series
   budgetMonth: null, // null = all-time average; else "YYYY-MM"
@@ -300,7 +302,21 @@ export const useStore = create((set, get) => ({
       })(),
       get().loadBudget(),
       get().loadScenarioCompare(),
+      get().loadAnalytics(),
     ])
+  },
+
+  // A3/A4: recurring charges + insights derive from the transaction history.
+  async loadAnalytics() {
+    try {
+      const [subscriptions, insights] = await Promise.all([
+        api.subscriptions(),
+        api.insights(),
+      ])
+      set({ subscriptions, insights: insights.insights })
+    } catch {
+      /* non-fatal */
+    }
   },
 
   // ---- E4: multi-branch compare ---- //
