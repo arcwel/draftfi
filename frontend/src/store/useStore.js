@@ -32,7 +32,14 @@ export const useStore = create((set, get) => ({
   transactions: [],
   totalTransactions: 0,
 
-  llm: { available: false, latency_ms: null, provider: '', model: '', detail: null },
+  llm: {
+    available: false,
+    latency_ms: null,
+    provider: '',
+    model: '',
+    detail: null,
+    notice: null, // { provider, previous_model, new_model, reason }
+  },
   llmConfig: null, // { provider, model, base_url, providers: [] }
   savingLlmConfig: false,
 
@@ -167,6 +174,18 @@ export const useStore = create((set, get) => ({
     set({ updateDismissed: true })
   },
 
+  // A retired model is swapped out for the user automatically; this only
+  // acknowledges the note about it. Never gates anything.
+  async dismissModelNotice() {
+    const llm = get().llm
+    set({ llm: { ...llm, notice: null } }) // optimistic: the banner goes now
+    try {
+      set({ llm: await api.dismissModelNotice() })
+    } catch {
+      /* backend unreachable — the banner stays dismissed for this session */
+    }
+  },
+
   async loadLlmConfig() {
     try {
       set({ llmConfig: await api.llmConfig() })
@@ -235,7 +254,16 @@ export const useStore = create((set, get) => ({
     try {
       set({ llm: await api.llmStatus() })
     } catch {
-      set({ llm: { available: false, latency_ms: null, model: '', detail: 'offline' } })
+      set({
+        llm: {
+          available: false,
+          latency_ms: null,
+          provider: '',
+          model: '',
+          detail: 'offline',
+          notice: null,
+        },
+      })
     }
   },
 

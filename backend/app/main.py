@@ -19,6 +19,7 @@ from app.api import (
     imports,
     insights,
     llm_status,
+    logs,
     scenario,
     simulation,
     transactions,
@@ -29,7 +30,7 @@ from app.api import (
 from app.config import get_settings
 from app.db.connection import init_db, session
 from app.models.schemas import UpdateInfo
-from app.services import security, updates
+from app.services import logging_setup, security, updates
 
 
 def _frontend_dir() -> Path | None:
@@ -53,6 +54,8 @@ def _frontend_dir() -> Path | None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Start the log file before anything else so boot failures are captured.
+    logging_setup.setup_logging()
     # Create/upgrade the local SQLite database and seed defaults on boot.
     init_db()
     # Start locked when a passcode is configured (G2).
@@ -100,6 +103,7 @@ def create_app() -> FastAPI:
     app.include_router(data.router)
     app.include_router(scenario.router)
     app.include_router(export.router)
+    app.include_router(logs.router)
 
     @app.get("/health", tags=["meta"])
     def health() -> dict:

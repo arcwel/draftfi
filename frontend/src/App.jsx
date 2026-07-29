@@ -6,6 +6,7 @@ import Charts from './zones/Charts'
 import Ledger from './zones/Ledger'
 import SyncButton from './components/SyncButton'
 import UpdateBanner from './components/UpdateBanner'
+import ModelNoticeBanner from './components/ModelNoticeBanner'
 import LockScreen from './components/LockScreen'
 import iconUrl from './assets/DraftFi_Icon.png'
 
@@ -52,6 +53,7 @@ export default function App() {
           <span className="hidden text-[11px] text-gray-600 sm:inline">
             all data stays on this machine
           </span>
+          <ModelNoticeBanner />
           <UpdateBanner />
           <SyncButton />
         </div>

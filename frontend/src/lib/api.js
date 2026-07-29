@@ -39,6 +39,13 @@ async function request(path, options = {}) {
 export const api = {
   llmStatus: () => request('/llm/status'),
 
+  // Acknowledge the "we switched your retired model" note.
+  dismissModelNotice: () => request('/llm/notice/dismiss', { method: 'POST' }),
+
+  // Diagnostics: where the logs are, and a one-click zip of them.
+  logsInfo: () => request('/logs'),
+  logsExportUrl: () => `${BASE}/logs/export`,
+
   // F1: is a newer desktop release available?
   updateCheck: () => request('/update-check'),
 

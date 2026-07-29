@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../store/useStore'
+import { api } from '../lib/api'
+
+function formatBytes(n) {
+  if (!n) return '0 KB'
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
 
 // Currency + matching locale presets (G4). Pairing them avoids invalid combos
 // and keeps the UI to a single choice.
@@ -32,10 +39,26 @@ export default function SettingsPanel() {
   const [pcFlash, setPcFlash] = useState(null)
   // Local slider value so dragging previews instantly; persisted on release.
   const [scale, setScale] = useState(prefs.text_scale ?? 0)
+  const [logs, setLogs] = useState(null)
 
   useEffect(() => {
     setScale(prefs.text_scale ?? 0)
   }, [prefs.text_scale])
+
+  // Diagnostics panel is informational; a failure here must never break
+  // settings, so it just stays hidden.
+  useEffect(() => {
+    let cancelled = false
+    api
+      .logsInfo()
+      .then((info) => {
+        if (!cancelled) setLogs(info)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   async function onCurrency(e) {
     const p = PRESETS.find((x) => x.currency === e.target.value)
@@ -170,6 +193,32 @@ export default function SettingsPanel() {
         </div>
         <p className="mt-1 text-[10px] text-gray-600">
           Locks the app on launch until the passcode is entered.
+        </p>
+      </div>
+
+      {/* Diagnostics: one click to produce something attachable to a bug
+          report. API keys are stripped before anything is written to disk. */}
+      <div className="border-t border-edge pt-2">
+        <div className="mb-1 flex items-center justify-between">
+          <span className="text-[11px] text-gray-500">Diagnostics</span>
+          {logs && (
+            <span className="text-[10px] text-gray-600">
+              {logs.files} file{logs.files === 1 ? '' : 's'} ·{' '}
+              {formatBytes(logs.size_bytes)}
+            </span>
+          )}
+        </div>
+        <a
+          href={api.logsExportUrl()}
+          download="draftfi-logs.zip"
+          className="block rounded-md border border-edge bg-panel py-1 text-center text-[11px] font-medium text-gray-200 hover:border-sky-500 hover:text-sky-300"
+        >
+          Export logs
+        </a>
+        <p className="mt-1 break-all text-[10px] text-gray-600">
+          Downloads a zip of DraftFi's activity log. API keys are redacted
+          before anything is written.
+          {logs ? ` Stored in ${logs.directory}` : ''}
         </p>
       </div>
     </div>

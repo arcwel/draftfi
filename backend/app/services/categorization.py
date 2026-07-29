@@ -142,6 +142,14 @@ async def categorize_rows_batch(
     provider_error: str | None = None
     try:
         batch = await llm.clean_merchants_batch(config, unique, category_names)
+    except llm.ModelUnavailable as exc:
+        # The model id is retired. Distinct from an outage: the caller can fix
+        # this by switching models and replaying, so say so explicitly. Must be
+        # caught before LLMUnavailable, which it subclasses.
+        provider_error = str(exc)
+        if report is not None:
+            report["model_gone"] = True
+        batch = [None] * len(unique)
     except llm.LLMUnavailable as exc:
         # The endpoint refused us (rate limit / auth / outage). Retrying each
         # row individually would multiply the load against a provider that is
@@ -166,6 +174,13 @@ async def categorize_rows_batch(
                 outcome = await llm.clean_merchant(
                     config, row.raw_description, category_names
                 )
+            except llm.ModelUnavailable as exc:
+                provider_error = str(exc)
+                if report is not None:
+                    report["provider_error"] = provider_error
+                    report["model_gone"] = True
+                results[i] = uncategorized_for(row)
+                continue
             except llm.LLMUnavailable as exc:
                 provider_error = str(exc)
                 if report is not None:

@@ -143,7 +143,17 @@ def _serve(port: int) -> None:
     # Import here so the DB env var is already set.
     from app.main import app
 
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+    # log_level="warning" used to suppress the access log, which meant a
+    # failing request left no trace anywhere. Logging is configured by
+    # app.main's lifespan (rotating file + console, credentials redacted), so
+    # let uvicorn emit at info and route through it.
+    uvicorn.run(
+        app,
+        host="127.0.0.1",
+        port=port,
+        log_level="info",
+        access_log=True,
+    )
 
 
 def main() -> None:

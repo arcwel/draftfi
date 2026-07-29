@@ -104,6 +104,15 @@ class CategoryMerge(BaseModel):
     target_id: int
 
 
+class ModelNotice(BaseModel):
+    """Set when DraftFi replaced a retired model on the user's behalf."""
+
+    provider: str
+    previous_model: str
+    new_model: str
+    reason: str = ""
+
+
 class LLMStatus(BaseModel):
     available: bool
     latency_ms: float | None = None
@@ -111,6 +120,8 @@ class LLMStatus(BaseModel):
     base_url: str
     model: str
     detail: str | None = None
+    # Informational only — the app keeps working whether or not it is shown.
+    notice: ModelNotice | None = None
 
 
 class ProviderInfo(BaseModel):
@@ -143,12 +154,18 @@ class LLMTestResult(BaseModel):
     ok: bool
     latency_ms: float | None = None
     detail: str | None = None
+    # The endpoint works but this model id is retired; suggested_model is what
+    # DraftFi would switch to, so the UI can offer a one-click fix.
+    model_gone: bool = False
+    suggested_model: str | None = None
 
 
 # A2: live model list for the picker (with free-text fallback on the client).
 class LLMModelsResult(BaseModel):
     models: list[str] = Field(default_factory=list)
     detail: str | None = None
+    # What DraftFi would pick for categorization on this provider.
+    recommended: str | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -456,6 +473,13 @@ class NarrativeResult(BaseModel):
 # --------------------------------------------------------------------------- #
 # Desktop update check (F1)
 # --------------------------------------------------------------------------- #
+class LogsInfo(BaseModel):
+    path: str
+    directory: str
+    files: int
+    size_bytes: int
+
+
 class UpdateInfo(BaseModel):
     current: str
     latest: str | None = None

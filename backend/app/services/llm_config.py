@@ -10,10 +10,18 @@ Supports four providers behind one interface:
 Provider config and API keys live in the same ``sandbox.db`` as everything
 else. Keys are stored per provider so switching providers doesn't lose them.
 The raw key value is never sent back to the frontend — only a ``has_key`` flag.
+
+Cloud providers retire model ids on their own schedule, which silently breaks a
+config that worked for months. This module therefore also owns the *repair*
+side: :func:`pick_replacement_model` chooses a live substitute, and the notice
+helpers record what changed so the UI can tell the user after the fact instead
+of blocking them with an error.
 """
 from __future__ import annotations
 
+import json
 import os
+import re
 import sqlite3
 from dataclasses import dataclass
 
@@ -43,6 +51,10 @@ class ProviderSpec:
     default_base_url: str
     is_local: bool
     model_hint: str
+    # Ranked substitutes tried first when the configured model is retired.
+    # Aliases that track "whatever is current" come first on purpose: they are
+    # the only ids that cannot go stale the way a pinned version does.
+    fallback_models: tuple[str, ...] = ()
 
 
 PROVIDERS: dict[str, ProviderSpec] = {
@@ -54,6 +66,7 @@ PROVIDERS: dict[str, ProviderSpec] = {
         default_base_url="http://localhost:11434",
         is_local=True,
         model_hint="e.g. llama3.2, mistral, qwen2.5",
+        fallback_models=("llama3.2", "llama3.1", "mistral", "qwen2.5"),
     ),
     "openai": ProviderSpec(
         id="openai",
@@ -62,7 +75,10 @@ PROVIDERS: dict[str, ProviderSpec] = {
         default_model="gpt-4o-mini",
         default_base_url="https://api.openai.com/v1",
         is_local=False,
-        model_hint="e.g. gpt-4o-mini, gpt-4o",
+        model_hint=(
+            "e.g. gpt-4o-mini, gpt-4o \u2014 auto-corrected if retired"
+        ),
+        fallback_models=("gpt-4o-mini", "gpt-4.1-mini", "gpt-4o"),
     ),
     "anthropic": ProviderSpec(
         id="anthropic",
@@ -71,16 +87,30 @@ PROVIDERS: dict[str, ProviderSpec] = {
         default_model="claude-haiku-4-5-20251001",
         default_base_url="https://api.anthropic.com",
         is_local=False,
-        model_hint="e.g. claude-haiku-4-5, claude-sonnet-4-5",
+        model_hint=(
+            "e.g. claude-haiku-4-5, claude-sonnet-4-5 \u2014 auto-corrected if retired"
+        ),
+        fallback_models=("claude-haiku-4-5", "claude-sonnet-4-5"),
     ),
     "gemini": ProviderSpec(
         id="gemini",
         label="Gemini (Google)",
         requires_key=True,
-        default_model="gemini-2.0-flash",
+        default_model="gemini-flash-latest",
         default_base_url="https://generativelanguage.googleapis.com/v1beta",
         is_local=False,
-        model_hint="e.g. gemini-2.0-flash, gemini-1.5-flash",
+        model_hint=(
+            "e.g. gemini-flash-latest, gemini-3.6-flash "
+            "\u2014 auto-corrected if retired"
+        ),
+        fallback_models=(
+            "gemini-flash-latest",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3-flash-preview",
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+        ),
     ),
 }
 
@@ -90,6 +120,120 @@ DEFAULT_PROVIDER = "ollama"
 K_PROVIDER = "llm_provider"
 K_MODEL = "llm_model"
 K_BASE_URL = "llm_base_url"
+# A pending "we switched your model for you" message, shown once and dismissed.
+K_MODEL_NOTICE = "llm_model_notice"
+
+
+# --------------------------------------------------------------------------- #
+# Model selection / repair
+# --------------------------------------------------------------------------- #
+# Categorization is a cheap, high-volume, strict-JSON task, so a text "flash"
+# tier model is always the right pick. Anything specialised for another
+# modality would either fail outright or cost far more for no benefit.
+_MODALITY_EXCLUDE = re.compile(
+    r"(image|vision|audio|tts|speech|video|embed|embedding|aqa|live|realtime|"
+    r"computer-use|imagen|veo|whisper|dall-?e|moderation|rerank|guard)",
+    re.IGNORECASE,
+)
+# Preview/experimental ids churn fastest; usable, but only if nothing else fits.
+_UNSTABLE = re.compile(r"(preview|exp|experimental|beta|alpha|nightly)", re.IGNORECASE)
+_CHEAP_TIER = re.compile(r"(flash|mini|haiku|lite|small|turbo)", re.IGNORECASE)
+_VERSION_RE = re.compile(r"(\d+(?:\.\d+)*)")
+
+
+def _version_key(name: str) -> tuple:
+    """Sort key from the numbers in a model id — 3.6 ranks above 3.5 above 2.0."""
+    match = _VERSION_RE.search(name)
+    if not match:
+        return (0,)
+    return tuple(int(part) for part in match.group(1).split("."))
+
+
+def _score(name: str) -> tuple:
+    """Rank a candidate model. Higher is better."""
+    return (
+        0 if _MODALITY_EXCLUDE.search(name) else 1,
+        1 if _CHEAP_TIER.search(name) else 0,
+        1 if "latest" in name.lower() else 0,
+        0 if _UNSTABLE.search(name) else 1,
+        _version_key(name),
+        # Shorter ids are the canonical alias (`gemini-2.0-flash` over
+        # `gemini-2.0-flash-001`), which is the more durable thing to pin to.
+        -len(name),
+    )
+
+
+def pick_replacement_model(
+    provider: str,
+    available: list[str] | None,
+    current: str | None = None,
+) -> str | None:
+    """Choose a live model to replace a retired ``current``.
+
+    Prefers the provider's ranked ``fallback_models`` when one of them is
+    actually offered, then falls back to scoring whatever the provider lists.
+    A purely static list would rot exactly the way the retired model did, so the
+    heuristic path is the one that has to keep working. Returns ``None`` when
+    there is nothing sensible to switch to (the caller then leaves the config
+    alone rather than guessing).
+    """
+    spec = PROVIDERS.get(provider)
+    offered = [m for m in (available or []) if m and m != current]
+
+    if spec:
+        offered_set = set(offered)
+        for candidate in spec.fallback_models:
+            if candidate != current and candidate in offered_set:
+                return candidate
+
+    usable = [m for m in offered if not _MODALITY_EXCLUDE.search(m)]
+    if usable:
+        return max(usable, key=_score)
+
+    # The provider gave us nothing usable (or nothing at all). Fall back to the
+    # ranked list blind — better a plausible guess than staying on a dead id.
+    if spec:
+        for candidate in spec.fallback_models:
+            if candidate != current:
+                return candidate
+    return None
+
+
+# --------------------------------------------------------------------------- #
+# "We changed your model" notice
+# --------------------------------------------------------------------------- #
+def record_model_notice(
+    conn: sqlite3.Connection,
+    *,
+    provider: str,
+    previous_model: str,
+    new_model: str,
+    reason: str | None = None,
+) -> dict:
+    """Persist a dismissible note that DraftFi repaired the model selection."""
+    notice = {
+        "provider": provider,
+        "previous_model": previous_model,
+        "new_model": new_model,
+        "reason": reason or "",
+    }
+    repo.set_setting(conn, K_MODEL_NOTICE, json.dumps(notice))
+    return notice
+
+
+def get_model_notice(conn: sqlite3.Connection) -> dict | None:
+    raw = repo.get_setting(conn, K_MODEL_NOTICE)
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def clear_model_notice(conn: sqlite3.Connection) -> None:
+    repo.set_setting(conn, K_MODEL_NOTICE, None)
 
 
 def _key_setting(provider: str) -> str:
@@ -158,6 +302,11 @@ def resolve_config(conn: sqlite3.Connection) -> LLMConfig:
         # so never hand the raw setting value to the provider.
         api_key=get_key(conn, provider),
     )
+
+
+def set_model(conn: sqlite3.Connection, model: str) -> None:
+    """Update only the active model, leaving provider/base URL/key untouched."""
+    repo.set_setting(conn, K_MODEL, model)
 
 
 def save_config(

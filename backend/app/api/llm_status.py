@@ -1,6 +1,7 @@
 """Local LLM health + provider configuration endpoints (PRD 4.1)."""
 from __future__ import annotations
 
+import logging
 import sqlite3
 import time
 
@@ -13,17 +14,23 @@ from app.models.schemas import (
     LLMModelsResult,
     LLMStatus,
     LLMTestResult,
+    ModelNotice,
     ProviderInfo,
 )
-from app.services import llm, llm_config
+from app.services import llm, llm_config, model_guard
 from app.services.llm_config import PROVIDERS, LLMConfig
+
+log = logging.getLogger("draftfi.api.llm")
 
 router = APIRouter(prefix="/llm", tags=["llm"])
 
-# The status pill polls this endpoint continuously, and for cloud providers each
-# check is a real API request that counts against the user's quota. Cache the
-# result briefly so polling can never burn through a rate limit on its own.
-_HEALTH_TTL_SECONDS = 60.0
+# The status pill polls this endpoint continuously, and the check is now a real
+# (if tiny) generation against the configured model — the only thing that
+# actually proves the setup works. That makes each check count against the
+# user's quota, so cache the verdict for longer than the UI's poll interval.
+# Any config change calls _invalidate_health_cache(), so the pill still reacts
+# immediately to something the user did.
+_HEALTH_TTL_SECONDS = 300.0
 _health_cache: dict[tuple, tuple[float, LLMStatus]] = {}
 
 
@@ -46,25 +53,57 @@ def _transient_config(conn: sqlite3.Connection, body: LLMConfigIn) -> LLMConfig:
     )
 
 
+def _notice_model(raw: dict | None) -> ModelNotice | None:
+    if not raw:
+        return None
+    try:
+        return ModelNotice(**raw)
+    except (TypeError, ValueError):  # pragma: no cover - malformed stored row
+        return None
+
+
 @router.get("/status", response_model=LLMStatus)
 async def llm_status(conn: sqlite3.Connection = Depends(get_db)) -> LLMStatus:
     config = llm_config.resolve_config(conn)
     key = (config.provider, config.model, config.base_url)
     cached = _health_cache.get(key)
     if cached and (time.monotonic() - cached[0]) < _HEALTH_TTL_SECONDS:
-        return cached[1]
+        # Re-read the notice so dismissing it takes effect without waiting out
+        # the health TTL.
+        return cached[1].model_copy(
+            update={"notice": _notice_model(llm_config.get_model_notice(conn))}
+        )
 
-    available, latency_ms, detail = await llm.health(config)
+    # A retired model is repaired here rather than reported: the user gets a
+    # working provider and a note about what changed, not a red pill and a
+    # 404 they can do nothing with.
+    guard = await model_guard.ensure_usable_model(conn, config)
+    if guard.switched:
+        _invalidate_health_cache()
+    config, result = guard.config, guard.health
+
     status = LLMStatus(
-        available=available,
-        latency_ms=latency_ms,
+        available=result.available,
+        latency_ms=result.latency_ms,
         provider=config.provider,
         base_url=config.base_url,
         model=config.model,
-        detail=detail,
+        detail=result.detail,
+        notice=_notice_model(llm_config.get_model_notice(conn)),
     )
-    _health_cache[key] = (time.monotonic(), status)
+    _health_cache[(config.provider, config.model, config.base_url)] = (
+        time.monotonic(),
+        status,
+    )
     return status
+
+
+@router.post("/notice/dismiss", response_model=LLMStatus)
+async def dismiss_notice(conn: sqlite3.Connection = Depends(get_db)) -> LLMStatus:
+    """Clear the "we switched your model" note once the user has seen it."""
+    llm_config.clear_model_notice(conn)
+    conn.commit()
+    return await llm_status(conn)
 
 
 def _config_out(conn: sqlite3.Connection) -> LLMConfigOut:
@@ -97,8 +136,25 @@ async def test_connection(
 ) -> LLMTestResult:
     """A1: validate the pasted key/endpoint on demand, without saving."""
     config = _transient_config(conn, body)
-    ok, latency_ms, detail = await llm.health(config)
-    return LLMTestResult(ok=ok, latency_ms=latency_ms, detail=detail)
+    result = await llm.check(config)
+    suggestion: str | None = None
+    if result.model_gone:
+        # Don't just say no — the user is standing right there, so tell them
+        # which model to pick instead.
+        try:
+            available = await llm.list_models(config)
+        except llm.LLMError:
+            available = []
+        suggestion = llm_config.pick_replacement_model(
+            config.provider, available, current=config.model
+        )
+    return LLMTestResult(
+        ok=result.available,
+        latency_ms=result.latency_ms,
+        detail=result.detail,
+        model_gone=result.model_gone,
+        suggested_model=suggestion,
+    )
 
 
 @router.post("/models", response_model=LLMModelsResult)
@@ -106,13 +162,20 @@ async def list_models(
     body: LLMConfigIn,
     conn: sqlite3.Connection = Depends(get_db),
 ) -> LLMModelsResult:
-    """A2: fetch the provider's live model list (client falls back to free text)."""
+    """A2: fetch the provider's live model list (client falls back to free text).
+
+    ``recommended`` marks the model DraftFi would pick for categorization, so
+    the picker can flag a sensible default instead of an alphabetical list.
+    """
     config = _transient_config(conn, body)
     try:
         models = await llm.list_models(config)
     except llm.LLMError as exc:
         return LLMModelsResult(models=[], detail=str(exc))
-    return LLMModelsResult(models=models)
+    return LLMModelsResult(
+        models=models,
+        recommended=llm_config.pick_replacement_model(config.provider, models),
+    )
 
 
 @router.get("/config", response_model=LLMConfigOut)
@@ -140,6 +203,8 @@ def put_config(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # An explicit choice supersedes any automatic switch we made earlier.
+    llm_config.clear_model_notice(conn)
     conn.commit()
     _invalidate_health_cache()
     return _config_out(conn)

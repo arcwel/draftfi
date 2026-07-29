@@ -15,7 +15,10 @@ repair/extract before giving up.
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
+import random
 import re
 import time
 from dataclasses import dataclass
@@ -23,6 +26,8 @@ from dataclasses import dataclass
 import httpx
 
 from app.services.llm_config import LLMConfig
+
+log = logging.getLogger("draftfi.llm")
 
 SYSTEM_PROMPT = (
     "You are a financial transaction normalizer. Given a raw bank statement "
@@ -56,6 +61,58 @@ class LLMUnavailable(LLMError):
     """
 
 
+class ModelUnavailable(LLMUnavailable):
+    """The provider is reachable but the configured model no longer exists.
+
+    This is the single most common way a working setup breaks weeks later: the
+    provider keeps answering, the key stays valid, the model still appears in
+    the catalogue — and every generation call 404s. Kept as a subclass so
+    existing ``except LLMUnavailable`` handlers still degrade gracefully, while
+    callers that can *repair* the config (see ``services.model_guard``) can
+    catch it specifically and switch to a live model instead of giving up.
+    """
+
+
+# Phrasings that unambiguously mean "this model id is dead". Providers word it
+# differently: Gemini says "is no longer available", OpenAI returns a
+# ``model_not_found`` code, Ollama says the model was never pulled.
+_STRONG_MODEL_GONE_HINTS = (
+    "no longer available",
+    "not available to new users",
+    "model_not_found",
+    "has been retired",
+    "is deprecated",
+    "was deprecated",
+)
+# Weaker phrasings only count when the provider actually names a model — a 404
+# from a mistyped base URL also says "not found", and swapping the model in
+# response to that would be a confusing non-fix.
+_WEAK_MODEL_GONE_HINTS = (
+    "not found",
+    "does not exist",
+    "unknown model",
+    "is not supported",
+    "try pulling it first",
+)
+
+
+def _response_text(resp) -> str:
+    try:
+        return resp.text or ""
+    except Exception:  # pragma: no cover - streamed or already-closed response
+        return ""
+
+
+def _is_model_gone(status: int | None, body: str) -> bool:
+    """True when this looks like a retired/renamed/missing model id."""
+    if status not in (400, 404):
+        return False
+    low = body.lower()
+    if any(hint in low for hint in _STRONG_MODEL_GONE_HINTS):
+        return True
+    return "model" in low and any(hint in low for hint in _WEAK_MODEL_GONE_HINTS)
+
+
 # Providers such as Gemini carry the API key in the URL query string, which
 # httpx echoes verbatim in its error messages. Redact it before any detail can
 # reach the frontend or logs.
@@ -68,7 +125,13 @@ def _redact(text: str) -> str:
 
 def _endpoint_error(exc: Exception) -> LLMUnavailable:
     """Turn a transport/HTTP failure into a message a user can act on."""
-    status = getattr(getattr(exc, "response", None), "status_code", None)
+    resp = getattr(exc, "response", None)
+    status = getattr(resp, "status_code", None)
+    if resp is not None and _is_model_gone(status, _response_text(resp)):
+        return ModelUnavailable(
+            "The selected model is no longer available from this provider. "
+            "DraftFi will switch to a supported model automatically."
+        )
     if status == 429:
         return LLMUnavailable(
             "Provider rate limit reached (HTTP 429). Wait for your quota to "
@@ -108,31 +171,58 @@ def parse_model_json(text: str) -> CleanResult:
 # --------------------------------------------------------------------------- #
 # Health checks (per provider)
 # --------------------------------------------------------------------------- #
-async def health(config: LLMConfig) -> tuple[bool, float | None, str | None]:
-    """Return (available, latency_ms, detail) for the active provider."""
-    if config.spec.requires_key and not config.api_key:
-        return False, None, "no API key configured"
+@dataclass
+class HealthResult:
+    available: bool
+    latency_ms: float | None = None
+    detail: str | None = None
+    # The endpoint answered, but the configured model is gone. Callers repair
+    # the config rather than reporting a dead provider to the user.
+    model_gone: bool = False
 
+
+async def check(config: LLMConfig) -> HealthResult:
+    """Verify the provider *and* the configured model with one real call.
+
+    Listing models is not enough, and that gap is exactly what let a broken
+    setup look healthy: providers keep advertising retired ids in their
+    catalogue long after generation stops working. Gemini will happily return a
+    retired model from ListModels with ``generateContent`` among its supported
+    methods while the generation call itself 404s — so a catalogue lookup
+    reports a green status pill for a config that cannot categorize a single
+    row. Only a real generation proves the provider/model/key triple works,
+    so that is what this does, using the smallest request each API accepts.
+    """
+    if config.spec.requires_key and not config.api_key:
+        return HealthResult(False, None, "no API key configured")
+
+    base = config.base_url.rstrip("/")
     start = time.perf_counter()
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with httpx.AsyncClient(timeout=12.0) as client:
             if config.provider == "ollama":
-                resp = await client.get(f"{config.base_url.rstrip('/')}/api/tags")
-            elif config.provider == "openai":
-                resp = await client.get(
-                    f"{config.base_url.rstrip('/')}/models",
-                    headers={"Authorization": f"Bearer {config.api_key}"},
+                resp = await client.post(
+                    f"{base}/api/generate",
+                    json={
+                        "model": config.model,
+                        "prompt": "ping",
+                        "stream": False,
+                        "options": {"num_predict": 1},
+                    },
                 )
-            elif config.provider == "gemini":
-                resp = await client.get(
-                    f"{config.base_url.rstrip('/')}/models",
-                    params={"key": config.api_key},
+            elif config.provider == "openai":
+                resp = await client.post(
+                    f"{base}/chat/completions",
+                    headers={"Authorization": f"Bearer {config.api_key}"},
+                    json={
+                        "model": config.model,
+                        "max_tokens": 1,
+                        "messages": [{"role": "user", "content": "ping"}],
+                    },
                 )
             elif config.provider == "anthropic":
-                # No unauthenticated list endpoint; a 1-token message validates
-                # both reachability and the key.
                 resp = await client.post(
-                    f"{config.base_url.rstrip('/')}/v1/messages",
+                    f"{base}/v1/messages",
                     headers=_anthropic_headers(config),
                     json={
                         "model": config.model,
@@ -140,17 +230,41 @@ async def health(config: LLMConfig) -> tuple[bool, float | None, str | None]:
                         "messages": [{"role": "user", "content": "ping"}],
                     },
                 )
+            elif config.provider == "gemini":
+                resp = await client.post(
+                    f"{base}/models/{config.model}:generateContent",
+                    params={"key": config.api_key},
+                    json={
+                        "contents": [{"role": "user", "parts": [{"text": "ping"}]}],
+                        "generationConfig": {"maxOutputTokens": 1},
+                    },
+                )
             else:  # pragma: no cover - guarded by config resolution
-                return False, None, f"unknown provider {config.provider}"
+                return HealthResult(
+                    False, None, f"unknown provider {config.provider}"
+                )
             resp.raise_for_status()
     except httpx.HTTPStatusError as exc:
         code = exc.response.status_code
+        if _is_model_gone(code, _response_text(exc.response)):
+            return HealthResult(
+                False,
+                None,
+                f"Model '{config.model}' is no longer available from this provider.",
+                model_gone=True,
+            )
         detail = "invalid API key" if code in (401, 403) else f"HTTP {code}"
-        return False, None, detail
+        return HealthResult(False, None, detail)
     except httpx.HTTPError as exc:
-        return False, None, _redact(str(exc))
+        return HealthResult(False, None, _redact(str(exc)))
     latency_ms = (time.perf_counter() - start) * 1000.0
-    return True, round(latency_ms, 1), None
+    return HealthResult(True, round(latency_ms, 1), None)
+
+
+async def health(config: LLMConfig) -> tuple[bool, float | None, str | None]:
+    """Tuple view of :func:`check`, kept for existing callers."""
+    result = await check(config)
+    return result.available, result.latency_ms, result.detail
 
 
 # --------------------------------------------------------------------------- #
@@ -290,6 +404,78 @@ async def _generate(config: LLMConfig, prompt: str, system: str) -> str:
     raise LLMError(f"Unknown provider: {config.provider}")  # pragma: no cover
 
 
+# Transient conditions worth another attempt. A retired model, a bad key, or a
+# malformed request is deliberately absent: those fail identically every time,
+# so retrying them only burns quota and delays the real error.
+_RETRY_STATUSES = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
+_MAX_ATTEMPTS = 3
+_BASE_BACKOFF_SECONDS = 0.75
+_MAX_BACKOFF_SECONDS = 20.0
+
+
+def _retry_after_seconds(exc: Exception) -> float | None:
+    """Honour a provider's ``Retry-After`` header when it sends one."""
+    resp = getattr(exc, "response", None)
+    if resp is None:
+        return None
+    raw = getattr(resp, "headers", {}).get("retry-after")
+    if not raw:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return None
+
+
+def _should_retry(exc: Exception) -> bool:
+    resp = getattr(exc, "response", None)
+    if resp is None:
+        # Timeouts and dropped connections carry no response at all.
+        return isinstance(exc, httpx.TimeoutException | httpx.NetworkError)
+    return resp.status_code in _RETRY_STATUSES
+
+
+async def _generate_with_retry(
+    config: LLMConfig,
+    prompt: str,
+    system: str,
+    *,
+    attempts: int = _MAX_ATTEMPTS,
+) -> str:
+    """``_generate`` with exponential backoff over transient provider failures.
+
+    One bad response used to be able to end a long run: sync aborts after two
+    consecutive failed chunks, and across hundreds of chunks a transient 5xx is
+    close to certain. Absorbing it here means the caller only ever sees a
+    failure that survived several attempts, which is the only kind worth
+    reporting to the user.
+    """
+    last: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return await _generate(config, prompt, system)
+        except httpx.HTTPError as exc:
+            last = exc
+            if attempt >= attempts or not _should_retry(exc):
+                raise
+            delay = _retry_after_seconds(exc)
+            if delay is None:
+                delay = _BASE_BACKOFF_SECONDS * (2 ** (attempt - 1))
+                # Jitter so simultaneous chunk failures don't resynchronise
+                # into a thundering herd against an already-struggling provider.
+                delay += random.uniform(0.0, delay * 0.25)
+            delay = min(delay, _MAX_BACKOFF_SECONDS)
+            log.warning(
+                "Provider call failed (attempt %d/%d): %s - retrying in %.1fs",
+                attempt,
+                attempts,
+                _redact(str(exc)),
+                delay,
+            )
+            await asyncio.sleep(delay)
+    raise last if last is not None else LLMError("LLM failed")  # pragma: no cover
+
+
 BATCH_SYSTEM_PROMPT = (
     "You are a financial transaction normalizer. You receive a numbered list "
     "of raw bank statement descriptors. For each one, identify the real-world "
@@ -352,7 +538,7 @@ async def clean_merchants_batch(
     )
     prompt = f"Raw descriptors:\n{lines}"
     try:
-        text = await _generate(config, prompt, system)
+        text = await _generate_with_retry(config, prompt, system)
     except httpx.HTTPError as exc:
         raise _endpoint_error(exc) from exc
     return parse_batch_json(text, len(raw_descriptions))
@@ -365,7 +551,7 @@ async def generate_json(config: LLMConfig, system: str, prompt: str) -> dict:
     natural-language scenario). Raises ``LLMError`` on transport/parse failure.
     """
     try:
-        text = await _generate(config, prompt, system)
+        text = await _generate_with_retry(config, prompt, system)
     except httpx.HTTPError as exc:
         raise _endpoint_error(exc) from exc
     candidate = text.strip()
@@ -404,7 +590,7 @@ async def clean_merchant(
     last_exc: Exception | None = None
     for _attempt in range(retries + 1):
         try:
-            text = await _generate(config, prompt, system)
+            text = await _generate_with_retry(config, prompt, system)
             return parse_model_json(text)
         except httpx.HTTPError as exc:
             raise _endpoint_error(exc) from exc

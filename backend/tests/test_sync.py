@@ -29,8 +29,8 @@ async def test_sync_resolves_via_llm_when_available(conn, monkeypatch):
     _add_uncategorized(conn, "AMZN MKTP US", 0)
     _add_uncategorized(conn, "SHELL OIL 12", 1)
 
-    async def fake_health(config):
-        return True, 5.0, None
+    async def fake_check(config):
+        return llm.HealthResult(available=True, latency_ms=5.0)
 
     def _resolve(raw):
         if "AMZN" in raw:
@@ -44,7 +44,7 @@ async def test_sync_resolves_via_llm_when_available(conn, monkeypatch):
     async def fake_clean(config, raw, cats, retries=1):
         return _resolve(raw)
 
-    monkeypatch.setattr(llm, "health", fake_health)
+    monkeypatch.setattr(llm, "check", fake_check)
     monkeypatch.setattr(llm, "clean_merchants_batch", fake_batch)
     monkeypatch.setattr(llm, "clean_merchant", fake_clean)
 
@@ -65,9 +65,9 @@ async def test_sync_noop_when_llm_unavailable(conn, monkeypatch):
     _add_uncategorized(conn, "MYSTERY VENDOR", 0)
 
     async def offline(config):
-        return False, None, "offline"
+        return llm.HealthResult(available=False, detail="offline")
 
-    monkeypatch.setattr(llm, "health", offline)
+    monkeypatch.setattr(llm, "check", offline)
 
     result = await sync.resync(conn)
     assert result.total == 1
@@ -85,9 +85,9 @@ async def test_sync_uses_cache_without_llm_call(conn, monkeypatch):
     _add_uncategorized(conn, "AMZN MKTP US", 0)
 
     async def offline(config):
-        return False, None, "offline"
+        return llm.HealthResult(available=False, detail="offline")
 
-    monkeypatch.setattr(llm, "health", offline)
+    monkeypatch.setattr(llm, "check", offline)
 
     result = await sync.resync(conn)
     assert result.recategorized == 1
@@ -98,11 +98,11 @@ async def test_sync_uses_cache_without_llm_call(conn, monkeypatch):
 async def test_rate_limited_provider_is_reported_not_silently_swallowed(conn, monkeypatch):
     """A 429 must surface as a reason and stop the run, not report a clean 'done'
     while every row quietly stays Uncategorized."""
-    for i in range(60):  # > 2 chunks so the early-abort path is exercised
+    for i in range(120):  # more chunks than the abort threshold needs
         _add_uncategorized(conn, f"MERCHANT {i}", i)
 
-    async def fake_health(config):
-        return True, 5.0, None
+    async def fake_check(config):
+        return llm.HealthResult(available=True, latency_ms=5.0)
 
     calls = {"batch": 0, "single": 0}
 
@@ -114,7 +114,7 @@ async def test_rate_limited_provider_is_reported_not_silently_swallowed(conn, mo
         calls["single"] += 1
         raise AssertionError("must not retry per-row against a refusing provider")
 
-    monkeypatch.setattr(llm, "health", fake_health)
+    monkeypatch.setattr(llm, "check", fake_check)
     monkeypatch.setattr(llm, "clean_merchants_batch", rate_limited_batch)
     monkeypatch.setattr(llm, "clean_merchant", should_not_run)
 
@@ -124,7 +124,7 @@ async def test_rate_limited_provider_is_reported_not_silently_swallowed(conn, mo
     assert "429" in (result.detail or ""), "the real reason must reach the UI"
     assert result.stopped_early is True
     # Bailed out after the failure threshold instead of grinding every chunk...
-    assert calls["batch"] == 2
+    assert calls["batch"] == sync.MAX_PROVIDER_FAILURES
     # ...and never amplified into per-row calls.
     assert calls["single"] == 0
     # Every row is still accounted for as unresolved.
