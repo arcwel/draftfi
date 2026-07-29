@@ -6,6 +6,10 @@ uvicorn access log (the one place a failing request would have shown up) was
 suppressed by ``log_level="warning"``. Diagnosing anything meant launching the
 frozen app by hand and curling its API.
 
+Set ``DRAFTFI_LOG_DIR`` to write somewhere else - the test suite points it at a
+temp directory, because a test run has no business appending to the file the
+user is about to send you as a bug report.
+
 Logs land next to the database in the per-user app-data directory, so they
 persist across launches and are always writable:
 
@@ -90,7 +94,9 @@ class RedactFilter(logging.Filter):
 
 
 def log_dir() -> Path:
-    path = user_data_dir() / LOG_DIR_NAME
+    """Where log files are written. ``DRAFTFI_LOG_DIR`` overrides the default."""
+    override = os.environ.get("DRAFTFI_LOG_DIR")
+    path = Path(override).expanduser() if override else user_data_dir() / LOG_DIR_NAME
     path.mkdir(parents=True, exist_ok=True)
     return path
 

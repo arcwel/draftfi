@@ -122,6 +122,10 @@ class LLMStatus(BaseModel):
     detail: str | None = None
     # Informational only — the app keeps working whether or not it is shown.
     notice: ModelNotice | None = None
+    # OS keychain state: "waiting" means a system prompt is pending the user's
+    # approval, so the key could not be read yet. Lets the UI say that plainly
+    # instead of showing a bare "no API key configured".
+    keychain: str | None = None
 
 
 class ProviderInfo(BaseModel):

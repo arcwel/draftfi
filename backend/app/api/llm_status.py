@@ -65,6 +65,28 @@ def _notice_model(raw: dict | None) -> ModelNotice | None:
 @router.get("/status", response_model=LLMStatus)
 async def llm_status(conn: sqlite3.Connection = Depends(get_db)) -> LLMStatus:
     config = llm_config.resolve_config(conn)
+
+    # A pending OS keychain prompt means the key genuinely isn't readable yet.
+    # Say so, rather than probing the provider without a key and reporting the
+    # misleading "no API key configured" — and don't cache a state the user is
+    # about to resolve with one click.
+    keychain = llm_config.keychain_status()
+    if keychain == llm_config.KEYCHAIN_WAITING and not config.api_key:
+        return LLMStatus(
+            available=False,
+            latency_ms=None,
+            provider=config.provider,
+            base_url=config.base_url,
+            model=config.model,
+            detail=(
+                "Waiting for keychain approval — your OS is asking permission "
+                "to read the saved API key. Approve the prompt (choose Always "
+                "Allow) and this clears itself."
+            ),
+            notice=_notice_model(llm_config.get_model_notice(conn)),
+            keychain=keychain,
+        )
+
     key = (config.provider, config.model, config.base_url)
     cached = _health_cache.get(key)
     if cached and (time.monotonic() - cached[0]) < _HEALTH_TTL_SECONDS:
@@ -90,11 +112,13 @@ async def llm_status(conn: sqlite3.Connection = Depends(get_db)) -> LLMStatus:
         model=config.model,
         detail=result.detail,
         notice=_notice_model(llm_config.get_model_notice(conn)),
+        keychain=llm_config.keychain_status(),
     )
-    _health_cache[(config.provider, config.model, config.base_url)] = (
-        time.monotonic(),
-        status,
-    )
+    if status.keychain != llm_config.KEYCHAIN_WAITING:
+        _health_cache[(config.provider, config.model, config.base_url)] = (
+            time.monotonic(),
+            status,
+        )
     return status
 
 

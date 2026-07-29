@@ -37,6 +37,9 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  // Also the app version, which the Settings header shows.
+  health: () => request('/health'),
+
   llmStatus: () => request('/llm/status'),
 
   // Acknowledge the "we switched your retired model" note.

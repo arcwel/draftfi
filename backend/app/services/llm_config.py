@@ -20,12 +20,16 @@ of blocking them with an error.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import sqlite3
+import threading
 from dataclasses import dataclass
 
 from app.db import repository as repo
+
+log = logging.getLogger("draftfi.llm_config")
 
 try:  # OS keychain is optional — headless/CI installs fall back to plaintext.
     import keyring
@@ -37,6 +41,98 @@ except Exception:  # pragma: no cover - keyring not installed
 KEYRING_SERVICE = "DraftFi"
 _KEYRING_MARKER = "__keyring__"
 _keyring_state: bool | None = None
+
+# --------------------------------------------------------------------------- #
+# Keychain access, bounded
+# --------------------------------------------------------------------------- #
+# On macOS the keychain grants access per *binary signature*. Rebuilding the app
+# (ad-hoc signed, so a new hash every time) invalidates that grant, and the next
+# read pops a system dialog that blocks until someone clicks it. That read sits
+# on the boot path via resolve_config(), so an unanswered dialog made the whole
+# app look frozen with no explanation at all.
+#
+# So never block a request on it. The read runs on a daemon thread and callers
+# wait a bounded time; if the user approves the dialog later, a subsequent call
+# picks the value up. Daemon specifically so a thread parked on an unanswered
+# dialog can't stop the app from quitting.
+KEYCHAIN_OK = "ok"
+KEYCHAIN_WAITING = "waiting"  # a system prompt is pending the user's approval
+KEYCHAIN_ERROR = "error"
+KEYCHAIN_DISABLED = "disabled"
+
+KEYCHAIN_TIMEOUT_SECONDS = 3.0
+
+_keychain_status: str = KEYCHAIN_OK
+_keychain_lock = threading.Lock()
+_keychain_reads: dict[str, _KeychainRead] = {}
+
+
+class _KeychainRead:
+    """One in-flight keychain read, observable without joining it."""
+
+    def __init__(self, key_id: str) -> None:
+        self.key_id = key_id
+        self.value: str | None = None
+        self.error: BaseException | None = None
+        self.done = threading.Event()
+        self.thread = threading.Thread(
+            target=self._run, name=f"keychain:{key_id}", daemon=True
+        )
+        self.thread.start()
+
+    def _run(self) -> None:
+        try:
+            self.value = keyring.get_password(KEYRING_SERVICE, self.key_id)
+        except BaseException as exc:  # noqa: BLE001 - surfaced via .error
+            self.error = exc
+        finally:
+            self.done.set()
+
+
+def keychain_status() -> str:
+    """Last known state of OS keychain access, for the UI to explain itself."""
+    return _keychain_status
+
+
+def _keyring_get(key_id: str) -> str | None:
+    """Read a secret from the OS keychain without ever hanging the caller."""
+    global _keychain_status
+    if keyring is None:  # pragma: no cover - keyring not installed
+        _keychain_status = KEYCHAIN_DISABLED
+        return None
+
+    with _keychain_lock:
+        read = _keychain_reads.get(key_id)
+        # Retry a read that finished badly; reuse one that is still in flight so
+        # a stuck dialog can't spawn a thread per request.
+        if read is None or (read.done.is_set() and read.error is not None):
+            read = _KeychainRead(key_id)
+            _keychain_reads[key_id] = read
+        # Already known to be parked on a dialog: don't pay the timeout again.
+        known_blocked = _keychain_status == KEYCHAIN_WAITING and not read.done.is_set()
+
+    if known_blocked:
+        return None
+
+    if not read.done.wait(KEYCHAIN_TIMEOUT_SECONDS):
+        _keychain_status = KEYCHAIN_WAITING
+        log.warning(
+            "Keychain read for %r is waiting on OS approval - the app stays "
+            "usable; approve the system prompt to restore provider access.",
+            key_id,
+        )
+        return None
+
+    with _keychain_lock:
+        _keychain_reads.pop(key_id, None)
+
+    if read.error is not None:
+        _keychain_status = KEYCHAIN_ERROR
+        log.warning("Keychain read for %r failed: %s", key_id, read.error)
+        return None
+
+    _keychain_status = KEYCHAIN_OK
+    return read.value
 
 
 # --------------------------------------------------------------------------- #
@@ -346,25 +442,39 @@ def get_key(conn: sqlite3.Connection, provider: str) -> str | None:
     """Return the stored API key for a provider (or None).
 
     Resolves the keychain when the row is a marker; otherwise it's a legacy or
-    fallback plaintext value.
+    fallback plaintext value. Never blocks longer than
+    ``KEYCHAIN_TIMEOUT_SECONDS`` - see :func:`_keyring_get`.
     """
     key_id = _key_setting(provider)
     stored = repo.get_setting(conn, key_id)
     if not stored:
         return None
     if stored == _KEYRING_MARKER:
-        try:
-            return keyring.get_password(KEYRING_SERVICE, key_id)
-        except Exception:  # pragma: no cover - keychain read failed at runtime
+        if not _keyring_usable():
+            # DRAFTFI_NO_KEYRING opts out of the keychain entirely, reads
+            # included. Previously the flag only gated writes, so tests and
+            # headless servers still hit the OS keychain (and its dialogs)
+            # despite having explicitly opted out.
             return None
+        return _keyring_get(key_id)
     return stored
 
 
 def clear_key(conn: sqlite3.Connection, provider: str) -> None:
     key_id = _key_setting(provider)
-    if repo.get_setting(conn, key_id) == _KEYRING_MARKER:
-        try:
-            keyring.delete_password(KEYRING_SERVICE, key_id)
-        except Exception:  # pragma: no cover
-            pass
+    if repo.get_setting(conn, key_id) == _KEYRING_MARKER and _keyring_usable():
+        # Deleting can prompt for the same reason reading can, so bound this
+        # too. The DB row is cleared either way, so the key stops being used
+        # even if the keychain entry outlives it.
+        def _delete() -> None:
+            try:
+                keyring.delete_password(KEYRING_SERVICE, key_id)
+            except Exception:  # pragma: no cover - keychain refused the delete
+                log.warning("Could not remove %r from the keychain", key_id)
+
+        worker = threading.Thread(target=_delete, name="keychain:delete", daemon=True)
+        worker.start()
+        worker.join(KEYCHAIN_TIMEOUT_SECONDS)
+    with _keychain_lock:
+        _keychain_reads.pop(key_id, None)
     repo.set_setting(conn, key_id, None)

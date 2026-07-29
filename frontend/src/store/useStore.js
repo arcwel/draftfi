@@ -58,6 +58,7 @@ export const useStore = create((set, get) => ({
   goals: [], // E5: target net worth / cash records
   subscriptions: null, // A3: { items, total_monthly }
   insights: [], // A4: heuristic month-over-month insights
+  appVersion: null, // shown under the Settings heading
   updateInfo: null, // F1: { current, latest, update_available, url }
   updateDismissed: false, // F1: user closed the update banner this session
   preferences: { currency: 'USD', locale: 'en-US' }, // G4
@@ -156,9 +157,21 @@ export const useStore = create((set, get) => ({
       get().loadLlmConfig(),
       get().loadGoals(),
       get().checkForUpdate(),
+      get().loadVersion(),
       get().loadPreferences(),
     ])
     await get().recompute()
+  },
+
+  // Read the running app's version straight from the backend that serves this
+  // build, rather than inferring it from the update check (which needs network).
+  async loadVersion() {
+    try {
+      const { version } = await api.health()
+      if (version) set({ appVersion: version })
+    } catch {
+      /* backend not ready — the header just omits the version */
+    }
   },
 
   // F1: fetch the latest release info once at launch (fails silently offline).
