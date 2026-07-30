@@ -129,3 +129,45 @@ async def test_rate_limited_provider_is_reported_not_silently_swallowed(conn, mo
     assert calls["single"] == 0
     # Every row is still accounted for as unresolved.
     assert result.still_uncategorized == result.total
+
+
+@pytest.mark.asyncio
+async def test_sync_processes_newest_transactions_first(conn, monkeypatch):
+    """With a large backlog the ordering decides what gets fixed first, and a
+    run that stops early should leave the recent end resolved."""
+    uncat = repo.upsert_category(conn, "Uncategorized", "#64748B")
+    for i, date in enumerate(["2022-03-04", "2026-07-18", "2024-11-30"]):
+        repo.insert_transaction(
+            conn,
+            {
+                "date": date,
+                "raw_description": f"MERCHANT {date}",
+                "amount": -10.0,
+                "account_name": "Checking",
+                "category_id": uncat,
+                "clean_merchant": date,
+                "resolution": "uncategorized",
+                "import_hash": f"ord{i}",
+            },
+        )
+
+    seen: list[str] = []
+
+    async def fake_check(config):
+        return llm.HealthResult(available=True, latency_ms=1.0)
+
+    async def fake_batch(config, raws, cats):
+        seen.extend(raws)
+        return [llm.CleanResult(clean_merchant=r, category="Shopping") for r in raws]
+
+    monkeypatch.setattr(llm, "check", fake_check)
+    monkeypatch.setattr(llm, "clean_merchants_batch", fake_batch)
+    monkeypatch.setattr(sync, "CHUNK", 1)  # one row per call, so order is visible
+
+    await sync.resync(conn)
+
+    assert seen == [
+        "MERCHANT 2026-07-18",
+        "MERCHANT 2024-11-30",
+        "MERCHANT 2022-03-04",
+    ]

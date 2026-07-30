@@ -61,7 +61,8 @@ export const useStore = create((set, get) => ({
   appVersion: null, // shown under the Settings heading
   updateInfo: null, // F1: { current, latest, update_available, url }
   updateDismissed: false, // F1: user closed the update banner this session
-  preferences: { currency: 'USD', locale: 'en-US' }, // G4
+  // G4 + ledger layout. ledger_columns is column id -> px width.
+  preferences: { currency: 'USD', locale: 'en-US', ledger_columns: {} },
   security: { passcode_set: false, locked: false }, // G2
   booted: false, // G2: security-gate check complete
   budget: null, // BudgetSummary: monthly spending + scenario impact
@@ -133,6 +134,19 @@ export const useStore = create((set, get) => ({
   // once on release rather than on every step.
   previewTextScale(scale) {
     applyTextScale(scale)
+  },
+
+  // Ledger column widths. Deliberately not routed through updatePreferences:
+  // that re-applies formatting and text scale, which a column drag has no
+  // business touching. Failure is non-fatal — the widths stay applied for this
+  // session and simply don't persist.
+  async saveLedgerColumns(widths) {
+    set({ preferences: { ...get().preferences, ledger_columns: widths } })
+    try {
+      await api.setPreferences({ ledger_columns: widths })
+    } catch {
+      /* offline or backend busy — keep the local layout */
+    }
   },
 
   // G2: passcode management (from the settings panel).

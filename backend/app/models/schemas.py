@@ -523,9 +523,12 @@ class Preferences(BaseModel):
     currency: str
     locale: str
     text_scale: int = 0          # points added to the base font size (0-10)
+    # Ledger column widths in px, keyed by column id (see lib/ledgerColumns.js).
+    ledger_columns: dict[str, int] = Field(default_factory=dict)
 
 
 class PreferencesUpdate(BaseModel):
     currency: str | None = Field(default=None, max_length=8)
     locale: str | None = Field(default=None, max_length=16)
     text_scale: int | None = Field(default=None, ge=0, le=10)
+    ledger_columns: dict[str, int] | None = None

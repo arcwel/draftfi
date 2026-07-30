@@ -82,7 +82,7 @@ def update_preferences(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> Preferences:
     prefs = preferences.set_preferences(
-        conn, body.currency, body.locale, body.text_scale
+        conn, body.currency, body.locale, body.text_scale, body.ledger_columns
     )
     conn.commit()
     return Preferences(**prefs)

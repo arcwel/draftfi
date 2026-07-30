@@ -322,12 +322,22 @@ def delete_category(
 def list_uncategorized_transactions(
     conn: sqlite3.Connection,
 ) -> list[dict[str, Any]]:
-    """Transactions that never got a resolved category (e.g. imported offline)."""
+    """Transactions that never got a resolved category (e.g. imported offline).
+
+    Newest first. Sync walks this list in order and commits per chunk, so the
+    ordering decides what gets fixed first when there is a large backlog: recent
+    activity is what the ledger shows by default and what the budget and
+    insights views are computed from, so it earns the first API calls. It also
+    means a run that is interrupted or stopped early still leaves the most
+    useful end of the data resolved. ``id`` breaks ties so the order is stable
+    across runs (dates alone are not unique).
+    """
     return _rows(
         conn.execute(
             "SELECT * FROM transactions "
             "WHERE (resolution = 'uncategorized' OR resolution IS NULL) "
-            "AND is_split_parent = 0"
+            "AND is_split_parent = 0 "
+            "ORDER BY date DESC, id DESC"
         ).fetchall()
     )
 

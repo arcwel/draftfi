@@ -90,7 +90,12 @@ def test_passcode_is_hashed_not_stored_plaintext(client):
 # --------------------------------------------------------------------------- #
 def test_preferences_default_and_update(client):
     prefs = client.get("/preferences").json()
-    assert prefs == {"currency": "USD", "locale": "en-US", "text_scale": 0}
+    assert prefs == {
+        "currency": "USD",
+        "locale": "en-US",
+        "text_scale": 0,
+        "ledger_columns": {},
+    }
 
     updated = client.put("/preferences", json={"currency": "EUR", "locale": "de-DE"})
     assert updated.status_code == 200
@@ -98,6 +103,48 @@ def test_preferences_default_and_update(client):
     assert updated.json()["locale"] == "de-DE"
     # Persisted for the next read.
     assert client.get("/preferences").json()["currency"] == "EUR"
+
+
+def test_ledger_column_widths_round_trip(client):
+    updated = client.put(
+        "/preferences", json={"ledger_columns": {"raw": 420, "date": 90}}
+    )
+    assert updated.status_code == 200
+    assert updated.json()["ledger_columns"] == {"raw": 420, "date": 90}
+    assert client.get("/preferences").json()["ledger_columns"] == {
+        "raw": 420,
+        "date": 90,
+    }
+    # Updating something else must not wipe the saved layout.
+    client.put("/preferences", json={"currency": "GBP"})
+    assert client.get("/preferences").json()["ledger_columns"] == {
+        "raw": 420,
+        "date": 90,
+    }
+
+
+def test_ledger_column_widths_are_clamped(client):
+    """Nothing stored here may render a column too narrow to see or absurdly
+    wide — the frontend clamps too, but the API is the durable boundary."""
+    from app.services.preferences import MAX_COLUMN_WIDTH, MIN_COLUMN_WIDTH
+
+    client.put("/preferences", json={"ledger_columns": {"raw": 99999, "date": -5}})
+    stored = client.get("/preferences").json()["ledger_columns"]
+    assert stored == {"raw": MAX_COLUMN_WIDTH, "date": MIN_COLUMN_WIDTH}
+
+
+def test_malformed_stored_layout_degrades_to_empty(client):
+    """The whole UI boots through /preferences, so a bad row must not 500 it."""
+    from app.db import repository as repo
+    from app.db.connection import session
+    from app.services import preferences as prefs_service
+
+    with session() as conn:
+        repo.set_setting(conn, prefs_service.K_LEDGER_COLUMNS, "{not json")
+        conn.commit()
+    response = client.get("/preferences")
+    assert response.status_code == 200
+    assert response.json()["ledger_columns"] == {}
 
 
 def test_text_scale_persists_and_is_clamped(client):

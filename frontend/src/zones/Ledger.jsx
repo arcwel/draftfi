@@ -5,9 +5,21 @@ import { ResolutionBadge } from '../components/CategoryBadge'
 import TransactionModal from '../components/TransactionModal'
 import SplitModal from '../components/SplitModal'
 import CategoryManager from '../components/CategoryManager'
+import {
+  LEDGER_COLUMNS,
+  clampWidth,
+  defaultWidths,
+  mergeWidths,
+  totalWidth,
+} from '../lib/ledgerColumns'
 
 // Zone 4: transaction categorization ledger. Search, sort, and paging run
 // server-side over the full database (not just a loaded window).
+//
+// Column widths are user-set and persisted (see lib/ledgerColumns). The table
+// uses a fixed layout so a <colgroup> actually governs the widths — with `auto`
+// the browser overrides them from content. Consequence: cells must clip
+// explicitly, hence `truncate` on the text columns.
 export default function Ledger() {
   const transactions = useStore((s) => s.transactions)
   const total = useStore((s) => s.totalTransactions)
@@ -22,6 +34,8 @@ export default function Ledger() {
   const setTxQuery = useStore((s) => s.setTxQuery)
   const setTxSort = useStore((s) => s.setTxSort)
   const setTxPage = useStore((s) => s.setTxPage)
+  const savedWidths = useStore((s) => s.preferences.ledger_columns)
+  const saveLedgerColumns = useStore((s) => s.saveLedgerColumns)
 
   const [modal, setModal] = useState(null) // null | {} (add) | transaction (edit)
   const [splitting, setSplitting] = useState(null) // transaction | null
@@ -38,6 +52,58 @@ export default function Ledger() {
     return () => clearTimeout(debounceRef.current)
   }, [searchDraft, txQuery, setTxQuery])
 
+  // ---- resizable columns ---------------------------------------------------
+  const [widths, setWidths] = useState(() => mergeWidths(savedWidths))
+  // Drag handlers read the live widths from a ref: a pointer stream would
+  // otherwise capture a stale value from the render it started in.
+  const widthsRef = useRef(widths)
+  const dragRef = useRef(null)
+
+  useEffect(() => {
+    setWidths(mergeWidths(savedWidths))
+  }, [savedWidths])
+
+  useEffect(() => {
+    widthsRef.current = widths
+  }, [widths])
+
+  function beginResize(event, key) {
+    // Stop the header's sort button from firing on the same press.
+    event.preventDefault()
+    event.stopPropagation()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    dragRef.current = { key, from: event.clientX, start: widthsRef.current[key] }
+  }
+
+  function moveResize(event) {
+    const drag = dragRef.current
+    if (!drag) return
+    const next = clampWidth(drag.key, drag.start + (event.clientX - drag.from))
+    setWidths((current) =>
+      current[drag.key] === next ? current : { ...current, [drag.key]: next },
+    )
+  }
+
+  function endResize(event) {
+    if (!dragRef.current) return
+    dragRef.current = null
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    // Persist once, on release — not on every pointer move.
+    saveLedgerColumns(widthsRef.current)
+  }
+
+  function resetColumn(event, key) {
+    event.preventDefault()
+    event.stopPropagation()
+    dragRef.current = null
+    const next = { ...widthsRef.current, [key]: defaultWidths()[key] }
+    setWidths(next)
+    saveLedgerColumns(next)
+  }
+
+  const tableWidth = totalWidth(widths)
   const pages = Math.max(1, Math.ceil(total / txPageSize))
 
   async function onDelete(t) {
@@ -50,21 +116,50 @@ export default function Ledger() {
     if (ok) await deleteTransaction(t.id)
   }
 
-  function SortHeader({ col, children, className }) {
-    const active = txSort.by === col
+  function Grip({ colKey }) {
     return (
-      <th className={className}>
-        <button
-          onClick={() => setTxSort(col)}
-          className={`font-medium ${active ? 'text-sky-300' : ''}`}
-          title="Sort"
-        >
-          {children}
-          {active && (txSort.dir === 'desc' ? ' ↓' : ' ↑')}
-        </button>
+      <span
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Drag to resize column, double-click to reset"
+        title="Drag to resize · double-click to reset"
+        onPointerDown={(e) => beginResize(e, colKey)}
+        onPointerMove={moveResize}
+        onPointerUp={endResize}
+        onPointerCancel={endResize}
+        onDoubleClick={(e) => resetColumn(e, colKey)}
+        className="absolute -right-px top-0 z-10 h-full w-1.5 cursor-col-resize touch-none select-none bg-transparent hover:bg-sky-500/70 active:bg-sky-400"
+      />
+    )
+  }
+
+  function HeaderCell({ col, sortable, align = 'left' }) {
+    const active = txSort.by === col.key
+    const pad = col.key === 'date' ? 'px-4' : 'px-2'
+    return (
+      <th
+        className={`relative ${pad} py-1.5 font-medium ${
+          align === 'right' ? 'text-right' : 'text-left'
+        }`}
+      >
+        {sortable ? (
+          <button
+            onClick={() => setTxSort(col.key)}
+            className={`max-w-full truncate font-medium ${active ? 'text-sky-300' : ''}`}
+            title="Sort"
+          >
+            {col.label}
+            {active && (txSort.dir === 'desc' ? ' ↓' : ' ↑')}
+          </button>
+        ) : (
+          <span className="block truncate">{col.label}</span>
+        )}
+        <Grip colKey={col.key} />
       </th>
     )
   }
+
+  const col = Object.fromEntries(LEDGER_COLUMNS.map((c) => [c.key, c]))
 
   return (
     <div className="flex h-full flex-col">
@@ -98,7 +193,9 @@ export default function Ledger() {
         <div />
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      {/* Both axes scroll: widening past the pane pans horizontally rather than
+          squeezing the other columns. */}
+      <div className="flex-1 overflow-auto">
         {transactions.length === 0 ? (
           <div className="p-6 text-center text-xs text-gray-600">
             {txQuery
@@ -106,20 +203,24 @@ export default function Ledger() {
               : 'No transactions yet — import a bank CSV from the sidebar.'}
           </div>
         ) : (
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-ink text-[11px] uppercase tracking-wide text-gray-500">
+          <table
+            className="text-sm"
+            style={{ tableLayout: 'fixed', width: `${tableWidth}px` }}
+          >
+            <colgroup>
+              {LEDGER_COLUMNS.map((c) => (
+                <col key={c.key} style={{ width: `${widths[c.key]}px` }} />
+              ))}
+            </colgroup>
+            <thead className="sticky top-0 z-10 bg-ink text-[11px] uppercase tracking-wide text-gray-500">
               <tr>
-                <SortHeader col="date" className="px-4 py-1.5 text-left">
-                  Date
-                </SortHeader>
-                <th className="px-2 py-1.5 text-left font-medium">Raw Descriptor</th>
-                <th className="px-2 py-1.5 text-left font-medium">Clean Merchant</th>
-                <SortHeader col="amount" className="px-2 py-1.5 text-right">
-                  Amount
-                </SortHeader>
-                <th className="px-2 py-1.5 text-left font-medium">Category</th>
-                <th className="px-2 py-1.5 text-left font-medium">Resolution</th>
-                <th className="px-3 py-1.5" />
+                <HeaderCell col={col.date} sortable />
+                <HeaderCell col={col.raw} />
+                <HeaderCell col={col.merchant} />
+                <HeaderCell col={col.amount} sortable align="right" />
+                <HeaderCell col={col.category} />
+                <HeaderCell col={col.resolution} />
+                <HeaderCell col={col.actions} />
               </tr>
             </thead>
             <tbody>
@@ -130,11 +231,9 @@ export default function Ledger() {
                     t.is_split_parent ? 'opacity-60' : ''
                   }`}
                 >
-                  <td className="whitespace-nowrap px-4 py-1.5 text-gray-400">
-                    {t.date}
-                  </td>
+                  <td className="truncate px-4 py-1.5 text-gray-400">{t.date}</td>
                   <td
-                    className="max-w-[200px] truncate px-2 py-1.5 font-mono text-[11px] text-gray-500"
+                    className="truncate px-2 py-1.5 font-mono text-[11px] text-gray-500"
                     title={t.raw_description}
                   >
                     {t.parent_tx_id != null && (
@@ -142,9 +241,12 @@ export default function Ledger() {
                     )}
                     {t.raw_description}
                   </td>
-                  <td className="px-2 py-1.5 text-gray-200">
-                    <span className="inline-flex items-center gap-1.5">
-                      {t.clean_merchant || '—'}
+                  <td
+                    className="truncate px-2 py-1.5 text-gray-200"
+                    title={t.clean_merchant || undefined}
+                  >
+                    <span className="inline-flex max-w-full items-center gap-1.5 align-middle">
+                      <span className="truncate">{t.clean_merchant || '—'}</span>
                       {t.note && (
                         <span title={t.note} className="cursor-help text-[11px]">
                           📝
@@ -153,7 +255,7 @@ export default function Ledger() {
                       {(t.tags || []).map((tag) => (
                         <span
                           key={tag}
-                          className="rounded-full bg-gray-800 px-1.5 py-0.5 text-[9px] text-gray-400"
+                          className="shrink-0 rounded-full bg-gray-800 px-1.5 py-0.5 text-[9px] text-gray-400"
                         >
                           {tag}
                         </span>
@@ -163,7 +265,7 @@ export default function Ledger() {
                   {/* The amount carries its category's colour, so Income reads
                       green, Fees & Interest red, and so on down the ledger. */}
                   <td
-                    className="whitespace-nowrap px-2 py-1.5 text-right font-medium"
+                    className="truncate px-2 py-1.5 text-right font-medium"
                     style={{ color: t.category_color || '#94a3b8' }}
                   >
                     {amount(t.amount)}
@@ -175,7 +277,9 @@ export default function Ledger() {
                       <select
                         value={t.category_id || ''}
                         onChange={(e) => overrideCategory(t.id, Number(e.target.value))}
-                        className="max-w-[150px] rounded-md border border-edge bg-panel px-1.5 py-1 text-xs text-gray-200 focus:border-sky-500 focus:outline-none"
+                        // Follows the column instead of a fixed cap, so widening
+                        // the column actually shows the category name.
+                        className="w-full rounded-md border border-edge bg-panel px-1.5 py-1 text-xs text-gray-200 focus:border-sky-500 focus:outline-none"
                       >
                         <option value="" disabled>
                           Set category…
@@ -188,10 +292,10 @@ export default function Ledger() {
                       </select>
                     )}
                   </td>
-                  <td className="px-2 py-1.5">
+                  <td className="truncate px-2 py-1.5">
                     <ResolutionBadge resolution={t.resolution} />
                   </td>
-                  <td className="whitespace-nowrap px-3 py-1.5 text-right">
+                  <td className="truncate px-3 py-1.5 text-right">
                     {t.is_split_parent ? (
                       <button
                         onClick={() => unsplitTransaction(t.id)}
