@@ -139,11 +139,12 @@ def _codesign(app_path: Path) -> None:
     if sys.platform != "darwin" or not app_path.exists():
         return
     identity = os.environ.get(SIGN_IDENTITY_ENV, DEFAULT_SIGN_IDENTITY)
-    available = subprocess.run(
+    listing = subprocess.run(
         ["security", "find-identity", "-v", "-p", "codesigning"],
         capture_output=True, text=True, check=False,
     ).stdout
-    if identity not in available:
+    line = next((ln for ln in listing.splitlines() if identity in ln), None)
+    if line is None:
         print(
             f"[warn] signing identity {identity!r} not found — leaving the "
             "ad-hoc signature in place.\n"
@@ -152,13 +153,35 @@ def _codesign(app_path: Path) -> None:
             "         bash packaging/make_signing_identity.sh"
         )
         return
-    result = subprocess.run(
-        [
-            "codesign", "--force", "--deep", "--timestamp=none",
-            "--sign", identity, str(app_path),
-        ],
-        capture_output=True, text=True, check=False,
-    )
+    if "CSSMERR" in line:
+        # find-identity counts an untrusted certificate as "valid" but tags it.
+        # codesign then blocks on a GUI prompt instead of failing, which hangs
+        # the build — so screen for the tag rather than the name alone.
+        print(
+            f"[warn] signing identity {identity!r} is not trusted "
+            f"({line.strip().split('(')[-1].rstrip(')')}), so codesign cannot "
+            "use it. Keeping the ad-hoc signature.\n"
+            "       Finish the one-time trust step (needs your admin password):\n"
+            "         bash packaging/make_signing_identity.sh"
+        )
+        return
+    try:
+        result = subprocess.run(
+            [
+                "codesign", "--force", "--deep", "--timestamp=none",
+                "--sign", identity, str(app_path),
+            ],
+            capture_output=True, text=True, check=False,
+            # Signing is fast; anything slower means a keychain dialog is waiting
+            # for a human. A build must never block on that.
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        print(
+            "[warn] codesign timed out — it is almost certainly waiting on a "
+            "keychain prompt for the signing key. Keeping the ad-hoc signature."
+        )
+        return
     if result.returncode != 0:
         print(f"[warn] codesign failed, keeping ad-hoc signature:\n{result.stderr}")
         return
