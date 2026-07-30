@@ -261,6 +261,30 @@ MERCHANT_CATEGORIES: dict[str, str] = {
     "WIRE FEE": "Fees & Interest", "RETURNED ITEM FEE": "Fees & Interest",
 }
 
+# Merchants that genuinely span categories. The rule table still gives them a
+# default for brand-new rows, but a repair pass must never overwrite an existing
+# category for one of these: a warehouse club is groceries AND household AND
+# petrol, and a convenience store is snacks AND fuel. Our guess is not better
+# than whatever is already there, and silently "correcting" 337 Costco rows is
+# imposing an opinion rather than fixing an error.
+AMBIGUOUS_MERCHANTS = frozenset(
+    {
+        "COSTCO", "COSTCO GAS", "WALMART", "TARGET", "SAMS CLUB", "BJS",
+        "7-ELEVEN", "CIRCLE K", "WAWA", "QUIKTRIP", "SPEEDWAY", "AMPM",
+        "VONS FUEL", "SAFEWAY FUEL", "KROGER FUEL", "MEIJER", "CVS",
+        "WALGREENS", "RITE AID", "DOLLAR GENERAL", "DOLLAR TREE",
+        "PAYPAL", "VENMO", "SQUARE", "APPLE", "GOOGLE", "AMAZON",
+    }
+)
+
+
+def is_ambiguous(key: str) -> bool:
+    """True when this merchant's category is a judgement call, not a fact."""
+    if key in AMBIGUOUS_MERCHANTS:
+        return True
+    return any(key.startswith(m) for m in AMBIGUOUS_MERCHANTS)
+
+
 _RULE_KEYS = sorted(MERCHANT_CATEGORIES, key=len, reverse=True)
 
 

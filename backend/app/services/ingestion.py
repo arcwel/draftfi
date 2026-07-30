@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 
 from app.db import repository as repo
 from app.db.connection import session
-from app.services import categorization, llm, llm_config
+from app.services import categorization, llm, llm_config, signs
 from app.services.csv_parser import ParsedRow, header_signature
 from app.services.statement_parsers import parse_statement, sniff_format
 
@@ -121,6 +121,23 @@ async def run_import(
         # time (only for CSV, which has a header signature).
         if mapping and sniff_format(filename, content) == "csv" and report.headers:
             save_mapping(conn, header_signature(report.headers), mapping)
+
+    # Normalize the amount convention BEFORE categorizing or storing. Card
+    # exports list a charge as positive; taken verbatim that makes the app read
+    # spending as income, and it also breaks transfer detection (negative
+    # payroll looks like a reversal). Fixing it here means every downstream
+    # number — and every category decision — sees the right direction.
+    inverted, why = signs.detect_inverted(
+        [(r.raw_description, r.amount) for r in pending]
+    )
+    if inverted:
+        status.errors.append(
+            f"Amounts looked inverted ({why}); flipped them so income is positive."
+        )
+        pending = [
+            replace(row, amount=-row.amount, import_hash=row.import_hash)
+            for row in pending
+        ]
 
     status.total = len(pending)
     status.state = "categorizing"

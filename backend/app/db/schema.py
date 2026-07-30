@@ -358,3 +358,13 @@ def initialize(conn: sqlite3.Connection) -> None:
     seed_defaults(conn)
     migrate_legacy_cache(conn)
     backfill_canonical_keys(conn)
+    # Correct an inverted amount convention before anything reads the numbers.
+    # Safe to call every launch: it only fires when the evidence is lopsided,
+    # and after a flip the evidence reads correctly.
+    from app.services.signs import repair_existing
+
+    repair_existing(conn)
+    # Then let the rule/transfer layers fix rows they never got to see.
+    from app.services.recategorize import apply_deterministic_repair
+
+    apply_deterministic_repair(conn)
