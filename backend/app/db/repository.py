@@ -119,6 +119,59 @@ def set_canonical_key(
     )
 
 
+# A merchant is "unresolved" when its transactions are still Uncategorized and
+# the user has not already ruled on it. Ordered by transaction count because the
+# first few decisions in that order settle the most rows.
+_REVIEW_WHERE = """
+    FROM transactions t
+    LEFT JOIN categories c ON c.id = t.category_id
+    LEFT JOIN merchant_category mc ON mc.canonical_key = t.canonical_key
+    WHERE t.is_split_parent = 0
+      AND t.canonical_key IS NOT NULL AND t.canonical_key != ''
+      AND (t.resolution = 'uncategorized' OR t.resolution IS NULL
+           OR COALESCE(c.name, '') = 'Uncategorized')
+      AND COALESCE(mc.source, '') != 'user'
+"""
+
+
+def merchants_needing_review(
+    conn: sqlite3.Connection, limit: int = 200, offset: int = 0
+) -> list[dict[str, Any]]:
+    """Unresolved merchants, most transactions first, with any model suggestion."""
+    return _rows(
+        conn.execute(
+            "SELECT t.canonical_key AS canonical_key, "
+            "COUNT(*) AS txn_count, "
+            "COALESCE(SUM(t.amount), 0) AS total_amount, "
+            "MIN(t.date) AS first_date, MAX(t.date) AS last_date, "
+            # A representative raw string: the point is to let the user recognise
+            # the merchant when the normalized name is ambiguous.
+            "MIN(t.raw_description) AS sample_description, "
+            "MAX(mc.display_name) AS stored_display_name, "
+            "MAX(mc.category_id) AS suggested_category_id, "
+            "MAX(mc.source) AS suggestion_source, "
+            "MAX(mc.confidence) AS confidence "
+            + _REVIEW_WHERE +
+            "GROUP BY t.canonical_key "
+            "ORDER BY COUNT(*) DESC, SUM(t.amount) ASC "
+            "LIMIT ? OFFSET ?",
+            (limit, offset),
+        ).fetchall()
+    )
+
+
+def review_queue_totals(conn: sqlite3.Connection) -> dict[str, int]:
+    """How much is left overall, for the progress line."""
+    row = conn.execute(
+        "SELECT COUNT(DISTINCT t.canonical_key) AS merchants, COUNT(*) AS transactions"
+        + _REVIEW_WHERE
+    ).fetchone()
+    return {
+        "merchants": int(row["merchants"] or 0),
+        "transactions": int(row["transactions"] or 0),
+    }
+
+
 def merchant_decision_counts(conn: sqlite3.Connection) -> dict[str, int]:
     """Decisions grouped by source — the "how much did we avoid asking" metric."""
     rows = conn.execute(

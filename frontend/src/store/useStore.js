@@ -73,6 +73,10 @@ export const useStore = create((set, get) => ({
   importProgress: null, // { processed, total } while an import runs
   // When a CSV can't be auto-mapped: { headers, sample_rows, signature, files }
   mappingNeeded: null,
+  // Merchant review queue (unresolved merchants, worst first).
+  merchantQueue: { items: [], total_merchants: 0, total_transactions: 0 },
+  merchantQueueLoading: false,
+
   syncing: false,
   syncResult: null, // { recategorized, still_uncategorized, ... } shown briefly
   syncProgress: null, // { processed, total } while a sync runs
@@ -236,6 +240,29 @@ export const useStore = create((set, get) => ({
     const updated = await api.deleteLlmKey(provider)
     set({ llmConfig: updated })
     await get().pollLlm()
+  },
+
+  async loadMerchantQueue() {
+    set({ merchantQueueLoading: true })
+    try {
+      set({ merchantQueue: await api.merchantReview(300) })
+    } catch {
+      /* backend not ready — the panel shows its empty state */
+    } finally {
+      set({ merchantQueueLoading: false })
+    }
+  },
+
+  async saveMerchantDecisions(decisions) {
+    const result = await api.saveMerchantDecisions(decisions)
+    // Everything downstream of a category change has to catch up.
+    await Promise.all([
+      get().loadMerchantQueue(),
+      get().loadCategories(),
+      get().loadTransactions(),
+    ])
+    await get().recompute()
+    return result
   },
 
   async loadCategories() {

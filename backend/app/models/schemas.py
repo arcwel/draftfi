@@ -486,6 +486,45 @@ class NarrativeResult(BaseModel):
 # --------------------------------------------------------------------------- #
 # Desktop update check (F1)
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# Merchant review queue
+# --------------------------------------------------------------------------- #
+class MerchantReviewRow(BaseModel):
+    canonical_key: str
+    display_name: str
+    txn_count: int
+    total_amount: float
+    first_date: str | None = None
+    last_date: str | None = None
+    sample_description: str | None = None
+    # What an automatic pass proposed, if anything. Shown as a suggestion the
+    # user confirms — never applied on its own.
+    suggested_category_id: int | None = None
+    suggestion_source: str | None = None
+    confidence: float | None = None
+
+
+class MerchantReviewPage(BaseModel):
+    items: list[MerchantReviewRow] = Field(default_factory=list)
+    total_merchants: int = 0
+    total_transactions: int = 0
+
+
+class MerchantDecision(BaseModel):
+    canonical_key: str
+    category_id: int
+    display_name: str | None = None
+
+
+class MerchantDecisionRequest(BaseModel):
+    decisions: list[MerchantDecision] = Field(default_factory=list)
+
+
+class MerchantDecisionResult(BaseModel):
+    merchants: int
+    transactions: int
+
+
 class LogsInfo(BaseModel):
     path: str
     directory: str

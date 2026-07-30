@@ -45,6 +45,17 @@ export const api = {
   // Acknowledge the "we switched your retired model" note.
   dismissModelNotice: () => request('/llm/notice/dismiss', { method: 'POST' }),
 
+  // Merchant review: one decision per merchant settles all its transactions.
+  merchantReview: (limit = 200) => request(`/merchants/review?limit=${limit}`),
+  saveMerchantDecisions: (decisions) =>
+    request('/merchants/decisions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decisions }),
+      // Applying hundreds of merchants rewrites thousands of rows.
+      timeout: 120000,
+    }),
+
   // Diagnostics: where the logs are, and a one-click zip of them.
   logsInfo: () => request('/logs'),
   logsExportUrl: () => `${BASE}/logs/export`,

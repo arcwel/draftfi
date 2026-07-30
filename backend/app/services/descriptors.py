@@ -244,6 +244,11 @@ def apply_aliases(key: str) -> str:
     return key
 
 
+def display_name(key: str) -> str:
+    """Readable merchant name for a canonical key."""
+    return _titleise(key)
+
+
 def _titleise(key: str) -> str:
     """Readable display name. Keeps all-caps acronyms and brand punctuation."""
     words = []

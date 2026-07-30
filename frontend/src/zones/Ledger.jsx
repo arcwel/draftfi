@@ -5,6 +5,7 @@ import { ResolutionBadge } from '../components/CategoryBadge'
 import TransactionModal from '../components/TransactionModal'
 import SplitModal from '../components/SplitModal'
 import CategoryManager from '../components/CategoryManager'
+import MerchantReview from '../components/MerchantReview'
 import {
   LEDGER_COLUMNS,
   clampWidth,
@@ -85,6 +86,14 @@ export default function Ledger() {
   const [modal, setModal] = useState(null) // null | {} (add) | transaction (edit)
   const [splitting, setSplitting] = useState(null) // transaction | null
   const [managingCats, setManagingCats] = useState(false)
+  const [reviewing, setReviewing] = useState(false)
+  const queueTotals = useStore((s) => s.merchantQueue)
+  const loadMerchantQueue = useStore((s) => s.loadMerchantQueue)
+
+  // Load the count once so the button can say how much work is waiting.
+  useEffect(() => {
+    loadMerchantQueue()
+  }, [loadMerchantQueue])
 
   // Debounce the search box → server query.
   const [searchDraft, setSearchDraft] = useState(txQuery)
@@ -197,6 +206,20 @@ export default function Ledger() {
             className="rounded-md border border-edge bg-panel px-2.5 py-1 text-xs text-gray-300 hover:border-sky-500 hover:text-sky-300"
           >
             Categories
+          </button>
+          {/* Says how much is left, so it reads as a task rather than a menu. */}
+          <button
+            onClick={() => setReviewing(true)}
+            title="Categorize by merchant — one decision covers every transaction for it"
+            className={`rounded-md border px-2.5 py-1 text-xs font-medium ${
+              queueTotals.total_merchants > 0
+                ? 'border-amber-600 bg-amber-950/40 text-amber-200 hover:border-amber-400'
+                : 'border-edge bg-panel text-gray-300 hover:border-sky-500 hover:text-sky-300'
+            }`}
+          >
+            {queueTotals.total_merchants > 0
+              ? `Review ${queueTotals.total_merchants} merchants`
+              : 'Review merchants'}
           </button>
           <input
             value={searchDraft}
@@ -368,6 +391,7 @@ export default function Ledger() {
         <SplitModal tx={splitting} onClose={() => setSplitting(null)} />
       )}
       {managingCats && <CategoryManager onClose={() => setManagingCats(false)} />}
+      {reviewing && <MerchantReview onClose={() => setReviewing(false)} />}
 
       {pages > 1 && (
         <div className="flex items-center justify-end gap-2 border-t border-edge px-4 py-1.5 text-xs text-gray-400">

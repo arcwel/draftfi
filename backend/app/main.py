@@ -20,6 +20,7 @@ from app.api import (
     insights,
     llm_status,
     logs,
+    merchants,
     scenario,
     simulation,
     transactions,
@@ -104,6 +105,7 @@ def create_app() -> FastAPI:
     app.include_router(scenario.router)
     app.include_router(export.router)
     app.include_router(logs.router)
+    app.include_router(merchants.router)
 
     @app.get("/health", tags=["meta"])
     def health() -> dict:

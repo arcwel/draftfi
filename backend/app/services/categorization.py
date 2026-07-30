@@ -149,7 +149,7 @@ async def _ask_model(
             repo.put_merchant_decision(
                 conn,
                 canonical_key=key,
-                display_name=answer.display_name or descriptors._titleise(key),
+                display_name=answer.display_name or descriptors.display_name(key),
                 category_id=category_id,
                 source="llm",
                 confidence=answer.confidence,
