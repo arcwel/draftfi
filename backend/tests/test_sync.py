@@ -241,3 +241,38 @@ async def test_transfers_are_not_categorized_as_spending(conn, monkeypatch):
     # And Transfers is excluded from the spending breakdown entirely.
     spend = {c["category_name"] for c in repo.category_breakdown(conn)}
     assert "Transfers" not in spend
+
+
+@pytest.mark.asyncio
+async def test_sync_reclaims_rows_the_machine_left_in_uncategorized(conn, monkeypatch):
+    """A model answer of "Uncategorized" sets resolution='llm', so the row looks
+    finished while carrying no useful category — and sync could never see it
+    again. 1,406 rows on a real file were stranded exactly this way."""
+    uncat = repo.upsert_category(conn, "Uncategorized", "#64748B")
+    repo.insert_transaction(
+        conn,
+        {
+            "date": "2026-05-05",
+            "raw_description": "VENMO PAYMENT 1035512345",
+            "amount": -40.0,
+            "account_name": "Checking",
+            "category_id": uncat,
+            "clean_merchant": "Venmo",
+            # Looks resolved, but is not.
+            "resolution": "llm",
+            "import_hash": "stranded1",
+        },
+    )
+    conn.commit()
+
+    assert len(repo.list_uncategorized_transactions(conn)) == 1
+
+    async def fake_check(config):
+        return llm.HealthResult(available=True, latency_ms=1.0)
+
+    monkeypatch.setattr(llm, "check", fake_check)
+    result = await sync.resync(conn)
+
+    assert result.recategorized == 1
+    rows = repo.list_transactions(conn)
+    assert rows[0]["category_name"] == "Transfers"

@@ -465,10 +465,18 @@ def list_uncategorized_transactions(
     """
     return _rows(
         conn.execute(
-            "SELECT * FROM transactions "
-            "WHERE (resolution = 'uncategorized' OR resolution IS NULL) "
-            "AND is_split_parent = 0 "
-            "ORDER BY date DESC, id DESC"
+            "SELECT t.* FROM transactions t "
+            "LEFT JOIN categories c ON c.id = t.category_id "
+            "WHERE t.is_split_parent = 0 AND ("
+            "     t.resolution = 'uncategorized' OR t.resolution IS NULL"
+            # Also rows the machine *resolved* to Uncategorized. Without this
+            # they are invisible to sync forever: a model answer of
+            # "Uncategorized" sets resolution='llm', so the row looks done while
+            # carrying no useful category. 1,406 rows on a real file were stuck
+            # exactly this way, and Sync reported nothing to do.
+            "  OR COALESCE(c.name, '') = 'Uncategorized'"
+            ") "
+            "ORDER BY t.date DESC, t.id DESC"
         ).fetchall()
     )
 
