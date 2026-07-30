@@ -13,6 +13,51 @@ import {
   totalWidth,
 } from '../lib/ledgerColumns'
 
+const COL = Object.fromEntries(LEDGER_COLUMNS.map((c) => [c.key, c]))
+
+// The drag target between two columns. Only pointerdown lives here — the move
+// and release listeners go on `window` (see Ledger), because this handle is 6px
+// wide and the pointer leaves it immediately once the drag starts.
+function Grip({ colKey, onBegin, onReset }) {
+  return (
+    <span
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Drag to resize column, double-click to reset"
+      title="Drag to resize · double-click to reset"
+      onPointerDown={(e) => onBegin(e, colKey)}
+      onDoubleClick={(e) => onReset(e, colKey)}
+      className="absolute -right-px top-0 z-10 h-full w-1.5 cursor-col-resize touch-none select-none bg-transparent hover:bg-sky-500/70 active:bg-sky-400"
+    />
+  )
+}
+
+function HeaderCell({ col, sortable, align, sort, onSort, onBegin, onReset }) {
+  const active = sort.by === col.key
+  const pad = col.key === 'date' ? 'px-4' : 'px-2'
+  return (
+    <th
+      className={`relative ${pad} py-1.5 font-medium ${
+        align === 'right' ? 'text-right' : 'text-left'
+      }`}
+    >
+      {sortable ? (
+        <button
+          onClick={() => onSort(col.key)}
+          className={`max-w-full truncate font-medium ${active ? 'text-sky-300' : ''}`}
+          title="Sort"
+        >
+          {col.label}
+          {active && (sort.dir === 'desc' ? ' ↓' : ' ↑')}
+        </button>
+      ) : (
+        <span className="block truncate">{col.label}</span>
+      )}
+      <Grip colKey={col.key} onBegin={onBegin} onReset={onReset} />
+    </th>
+  )
+}
+
 // Zone 4: transaction categorization ledger. Search, sort, and paging run
 // server-side over the full database (not just a loaded window).
 //
@@ -54,8 +99,8 @@ export default function Ledger() {
 
   // ---- resizable columns ---------------------------------------------------
   const [widths, setWidths] = useState(() => mergeWidths(savedWidths))
-  // Drag handlers read the live widths from a ref: a pointer stream would
-  // otherwise capture a stale value from the render it started in.
+  // Live widths for the drag handlers: a pointer stream would otherwise read a
+  // stale value captured by the render it started in.
   const widthsRef = useRef(widths)
   const dragRef = useRef(null)
 
@@ -67,37 +112,51 @@ export default function Ledger() {
     widthsRef.current = widths
   }, [widths])
 
+  // Move/release are tracked on `window` rather than on the grip. The grip is
+  // 6px wide, so the pointer is outside it almost immediately; relying on the
+  // element (or on pointer capture, which is easy to lose on a target that
+  // small) would strand the drag mid-gesture with the column stuck to the
+  // cursor. Listening globally also catches a release outside the window.
+  useEffect(() => {
+    function onMove(event) {
+      const drag = dragRef.current
+      if (!drag) return
+      const next = clampWidth(drag.key, drag.start + (event.clientX - drag.from))
+      setWidths((current) =>
+        current[drag.key] === next ? current : { ...current, [drag.key]: next },
+      )
+    }
+    function onUp() {
+      if (!dragRef.current) return
+      dragRef.current = null
+      document.body.style.removeProperty('cursor')
+      // Persist once, on release — not on every pointer move.
+      saveLedgerColumns(widthsRef.current)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+    }
+  }, [saveLedgerColumns])
+
   function beginResize(event, key) {
     // Stop the header's sort button from firing on the same press.
     event.preventDefault()
     event.stopPropagation()
-    event.currentTarget.setPointerCapture(event.pointerId)
     dragRef.current = { key, from: event.clientX, start: widthsRef.current[key] }
-  }
-
-  function moveResize(event) {
-    const drag = dragRef.current
-    if (!drag) return
-    const next = clampWidth(drag.key, drag.start + (event.clientX - drag.from))
-    setWidths((current) =>
-      current[drag.key] === next ? current : { ...current, [drag.key]: next },
-    )
-  }
-
-  function endResize(event) {
-    if (!dragRef.current) return
-    dragRef.current = null
-    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId)
-    }
-    // Persist once, on release — not on every pointer move.
-    saveLedgerColumns(widthsRef.current)
+    // Hold the resize cursor for the whole gesture, not just over the grip.
+    document.body.style.cursor = 'col-resize'
   }
 
   function resetColumn(event, key) {
     event.preventDefault()
     event.stopPropagation()
     dragRef.current = null
+    document.body.style.removeProperty('cursor')
     const next = { ...widthsRef.current, [key]: defaultWidths()[key] }
     setWidths(next)
     saveLedgerColumns(next)
@@ -116,50 +175,12 @@ export default function Ledger() {
     if (ok) await deleteTransaction(t.id)
   }
 
-  function Grip({ colKey }) {
-    return (
-      <span
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Drag to resize column, double-click to reset"
-        title="Drag to resize · double-click to reset"
-        onPointerDown={(e) => beginResize(e, colKey)}
-        onPointerMove={moveResize}
-        onPointerUp={endResize}
-        onPointerCancel={endResize}
-        onDoubleClick={(e) => resetColumn(e, colKey)}
-        className="absolute -right-px top-0 z-10 h-full w-1.5 cursor-col-resize touch-none select-none bg-transparent hover:bg-sky-500/70 active:bg-sky-400"
-      />
-    )
+  const headerProps = {
+    sort: txSort,
+    onSort: setTxSort,
+    onBegin: beginResize,
+    onReset: resetColumn,
   }
-
-  function HeaderCell({ col, sortable, align = 'left' }) {
-    const active = txSort.by === col.key
-    const pad = col.key === 'date' ? 'px-4' : 'px-2'
-    return (
-      <th
-        className={`relative ${pad} py-1.5 font-medium ${
-          align === 'right' ? 'text-right' : 'text-left'
-        }`}
-      >
-        {sortable ? (
-          <button
-            onClick={() => setTxSort(col.key)}
-            className={`max-w-full truncate font-medium ${active ? 'text-sky-300' : ''}`}
-            title="Sort"
-          >
-            {col.label}
-            {active && (txSort.dir === 'desc' ? ' ↓' : ' ↑')}
-          </button>
-        ) : (
-          <span className="block truncate">{col.label}</span>
-        )}
-        <Grip colKey={col.key} />
-      </th>
-    )
-  }
-
-  const col = Object.fromEntries(LEDGER_COLUMNS.map((c) => [c.key, c]))
 
   return (
     <div className="flex h-full flex-col">
@@ -214,13 +235,13 @@ export default function Ledger() {
             </colgroup>
             <thead className="sticky top-0 z-10 bg-ink text-[11px] uppercase tracking-wide text-gray-500">
               <tr>
-                <HeaderCell col={col.date} sortable />
-                <HeaderCell col={col.raw} />
-                <HeaderCell col={col.merchant} />
-                <HeaderCell col={col.amount} sortable align="right" />
-                <HeaderCell col={col.category} />
-                <HeaderCell col={col.resolution} />
-                <HeaderCell col={col.actions} />
+                <HeaderCell col={COL.date} sortable {...headerProps} />
+                <HeaderCell col={COL.raw} {...headerProps} />
+                <HeaderCell col={COL.merchant} {...headerProps} />
+                <HeaderCell col={COL.amount} sortable align="right" {...headerProps} />
+                <HeaderCell col={COL.category} {...headerProps} />
+                <HeaderCell col={COL.resolution} {...headerProps} />
+                <HeaderCell col={COL.actions} {...headerProps} />
               </tr>
             </thead>
             <tbody>

@@ -7,7 +7,11 @@
 // and the validation that keeps a stored value sane.
 
 export const LEDGER_COLUMNS = [
-  { key: 'date', label: 'Date', width: 96, min: 72 },
+  // 120, not 96: an ISO date measures ~79px at the base text size and the
+  // cell carries px-4, so 96 clipped it to "2026-0…" out of the box. A
+  // default that truncates is a bug; a *minimum* that does is the user's
+  // choice, so min stays where it is.
+  { key: 'date', label: 'Date', width: 120, min: 72 },
   // The widest default: raw descriptors are the reason resizing exists.
   { key: 'raw', label: 'Raw Descriptor', width: 260, min: 120 },
   { key: 'merchant', label: 'Clean Merchant', width: 220, min: 120 },
