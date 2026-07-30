@@ -160,6 +160,43 @@ MIGRATIONS: list[tuple[int, str, str]] = [
             WHERE name = 'Fees & Interest' AND color = '#A855F7';
         """,
     ),
+    (
+        9,
+        "merchant memo keyed on canonical merchant; transfer-aware categories",
+        """
+        -- Decisions are keyed on the CANONICAL merchant, not the raw
+        -- descriptor. Raw strings carry per-transaction junk (order ids,
+        -- terminal numbers), so the old merchant_llm_cache had roughly one row
+        -- per transaction and gave almost no reuse — and a fresh, often
+        -- different, model opinion for every variant of the same merchant.
+        CREATE TABLE IF NOT EXISTS merchant_category (
+            canonical_key TEXT PRIMARY KEY,
+            display_name  TEXT NOT NULL,
+            category_id   INTEGER,
+            -- 'user' | 'rule' | 'transfer' | 'llm'. 'user' outranks everything
+            -- and is never overwritten by an automatic decision.
+            source        TEXT NOT NULL DEFAULT 'llm',
+            confidence    REAL,
+            decided_at    TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_merchant_source
+            ON merchant_category(source);
+
+        -- Cached on the row so override propagation and grouping don't have to
+        -- re-run the normalizer over the whole table.
+        ALTER TABLE transactions ADD COLUMN canonical_key TEXT;
+        CREATE INDEX IF NOT EXISTS idx_tx_canonical
+            ON transactions(canonical_key);
+
+        -- Transfers are not spending. A card payment out of checking settles
+        -- purchases that were already counted, so including it double-counts
+        -- every dollar. Flagged categories are excluded from spending totals.
+        ALTER TABLE categories ADD COLUMN is_transfer INTEGER NOT NULL DEFAULT 0;
+        INSERT OR IGNORE INTO categories (name, color) VALUES ('Transfers', '#94A3B8');
+        UPDATE categories SET is_transfer = 1 WHERE name = 'Transfers';
+        """,
+    ),
 ]
 
 # Default budget categories with visualization colors (Tailwind-ish hexes).
@@ -180,6 +217,7 @@ DEFAULT_CATEGORIES: list[tuple[str, str]] = [
     ("Utilities", "#0EA5E9"),                # sky
     ("Travel", "#06B6D4"),                   # cyan
     ("Savings & Investments", "#14B8A6"),    # teal
+    ("Transfers", "#94A3B8"),                # slate-400 (excluded from spend)
     ("Uncategorized", "#64748B"),            # slate
 ]
 
@@ -248,8 +286,75 @@ def seed_defaults(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def backfill_canonical_keys(conn: sqlite3.Connection, limit: int = 50_000) -> int:
+    """Populate transactions.canonical_key for rows predating migration 9.
+
+    Runs in Python because normalization is regex work SQL can't express. Cheap
+    (~10k rows in well under a second) and idempotent — only NULLs are touched,
+    so a partial run just finishes next launch.
+    """
+    from app.services import descriptors
+
+    rows = conn.execute(
+        "SELECT id, raw_description FROM transactions "
+        "WHERE canonical_key IS NULL LIMIT ?",
+        (limit,),
+    ).fetchall()
+    if not rows:
+        return 0
+    updates = [
+        (descriptors.canonical_key(row["raw_description"]), row["id"]) for row in rows
+    ]
+    conn.executemany(
+        "UPDATE transactions SET canonical_key = ? WHERE id = ?", updates
+    )
+    conn.commit()
+    return len(updates)
+
+
+def migrate_legacy_cache(conn: sqlite3.Connection) -> int:
+    """Fold the old raw-keyed cache into the canonical merchant memo.
+
+    Kept as a one-way import rather than a rename: many raw rows collapse onto
+    one canonical key, so collisions are expected and the newest wins. The old
+    table is left in place untouched — it costs nothing and makes this
+    reversible.
+    """
+    from app.services import descriptors
+
+    done = conn.execute(
+        "SELECT value FROM app_settings WHERE key = 'legacy_cache_migrated'"
+    ).fetchone()
+    if done and done[0]:
+        return 0
+    rows = conn.execute(
+        "SELECT raw_description, clean_merchant, category_id FROM merchant_llm_cache"
+    ).fetchall()
+    imported = 0
+    for row in rows:
+        if row["category_id"] is None:
+            continue
+        key = descriptors.canonical_key(row["raw_description"])
+        conn.execute(
+            "INSERT INTO merchant_category "
+            "(canonical_key, display_name, category_id, source, confidence) "
+            "VALUES (?, ?, ?, 'llm', NULL) "
+            "ON CONFLICT(canonical_key) DO NOTHING",
+            (key, row["clean_merchant"] or key, row["category_id"]),
+        )
+        imported += 1
+    conn.execute(
+        "INSERT INTO app_settings (key, value) VALUES ('legacy_cache_migrated', '1') "
+        "ON CONFLICT(key) DO UPDATE SET value = '1'"
+    )
+    conn.commit()
+    return imported
+
+
 def initialize(conn: sqlite3.Connection) -> None:
     """Full bootstrap: schema migrations followed by default seed data."""
     conn.execute("PRAGMA foreign_keys = ON")
     apply_migrations(conn)
     seed_defaults(conn)
+    migrate_legacy_cache(conn)
+    backfill_canonical_keys(conn)

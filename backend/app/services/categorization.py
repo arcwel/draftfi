@@ -1,32 +1,59 @@
-"""Deterministic caching + categorization pipeline (PRD 6.1, 7).
+"""Tiered categorization: normalize, then resolve as cheaply as possible.
 
-For each ingested row:
+Resolution order, first hit wins. The ordering is the design — it puts the
+things we *know* ahead of the things we *guess*, and makes the answer stable:
 
-1. Look up ``merchant_llm_cache`` by raw descriptor.
-2. Cache hit  -> apply clean merchant + category instantly, tag ``cache``.
-3. Cache miss -> call the local LLM, tag ``llm``, then write the mapping to
-   the cache immediately so subsequent imports never re-query the model.
-4. No LLM reachable -> tag ``uncategorized`` (graceful degradation) and leave
-   the row for later re-categorization; nothing is written to the cache.
+1. ``user``     — a manual override. Permanent, outranks everything, forever.
+2. ``transfer`` — money movement (card payments, Venmo, payroll). Structural,
+                  not a judgement, and must precede merchant rules so
+                  "CAPITAL ONE MOBILE PMT" can't be read as a merchant.
+3. ``rule``     — seeded merchant table. Deterministic and free.
+4. ``memo``     — a decision already made for this merchant, from any source.
+                  This is the real cache, and it is what guarantees one merchant
+                  keeps one category instead of drifting between batches.
+5. ``llm``      — genuinely unknown merchants only, then written back to the
+                  memo so it is never asked twice.
+
+The key change from the previous design: everything is keyed on the *canonical
+merchant key* from :mod:`services.descriptors`, not the raw descriptor. Raw
+strings carry per-transaction junk, so keying on them meant near-zero cache
+reuse and a fresh (inconsistent) model opinion for every variant.
 """
 from __future__ import annotations
 
+import logging
 import sqlite3
 from dataclasses import dataclass
 
 from app.db import repository as repo
-from app.services import llm
+from app.services import descriptors, llm, merchant_rules
 from app.services.csv_parser import ParsedRow
 from app.services.llm_config import LLMConfig
 
-UNCATEGORIZED = "Uncategorized"
+log = logging.getLogger("draftfi.categorization")
+
+UNCATEGORIZED = merchant_rules.UNCATEGORIZED
+
+# Below this the model's own answer is discarded and the row is left for review.
+# An LLM benchmark on this task scored 80% overall but 0% on rare categories —
+# it guesses confidently rather than abstaining, so we need our own floor.
+MIN_LLM_CONFIDENCE = 0.55
+
+# One model call covers this many distinct merchants. Deliberately smaller than
+# the old 25: batching research only validates up to ~6 items and shows accuracy
+# degrading on harder tasks as batches grow. Because these are deduped merchants
+# rather than transactions, 8 keys still covers far more than 8 rows.
+MERCHANT_BATCH = 8
 
 
 @dataclass
 class Categorized:
     clean_merchant: str
     category_id: int | None
-    resolution: str  # 'cache' | 'llm' | 'uncategorized'
+    resolution: str  # 'cache' | 'llm' | 'rule' | 'transfer' | 'uncategorized'
+    # Cached onto the transaction row so override propagation and grouping never
+    # have to re-run the normalizer over the whole table.
+    canonical_key: str = ""
 
 
 def _resolve_category_id(conn: sqlite3.Connection, category_name: str) -> int:
@@ -34,8 +61,32 @@ def _resolve_category_id(conn: sqlite3.Connection, category_name: str) -> int:
     existing = repo.get_category_by_name(conn, category_name)
     if existing:
         return int(existing["id"])
-    # Unknown category from the model — create it with a neutral color.
     return repo.upsert_category(conn, category_name, "#64748B")
+
+
+def _deterministic(
+    conn: sqlite3.Connection, key: str, amount: float | None
+) -> tuple[int, str] | None:
+    """Tiers 1-4: user override, transfer/flow, seeded rule, existing memo."""
+    memo = repo.get_merchant_decision(conn, key)
+    if memo and memo["source"] == "user":
+        return int(memo["category_id"]), "override"
+
+    match = merchant_rules.resolve(key, amount)
+    if match is not None:
+        return _resolve_category_id(conn, match.category), match.source
+
+    if memo and memo["category_id"] is not None:
+        return int(memo["category_id"]), "cache"
+    return None
+
+
+def resolve_known(
+    conn: sqlite3.Connection, raw_description: str, amount: float | None = None
+) -> tuple[descriptors.Descriptor, tuple[int, str] | None]:
+    """Normalize and try every non-LLM tier. Public for reuse at import time."""
+    descriptor = descriptors.normalize(raw_description)
+    return descriptor, _deterministic(conn, descriptor.key, amount)
 
 
 async def categorize_row(
@@ -46,41 +97,65 @@ async def categorize_row(
     *,
     llm_available: bool = True,
 ) -> Categorized:
-    """Resolve a single row through the cache-first pipeline."""
-    cached = repo.get_cache(conn, row.raw_description)
-    if cached is not None:
-        return Categorized(
-            clean_merchant=cached["clean_merchant"],
-            category_id=cached["category_id"],
-            resolution="cache",
-        )
-
-    if not llm_available or config is None:
-        uncat_id = _resolve_category_id(conn, UNCATEGORIZED)
-        return Categorized(
-            clean_merchant=row.raw_description,
-            category_id=uncat_id,
-            resolution="uncategorized",
-        )
-
-    try:
-        result = await llm.clean_merchant(config, row.raw_description, category_names)
-    except llm.LLMError:
-        uncat_id = _resolve_category_id(conn, UNCATEGORIZED)
-        return Categorized(
-            clean_merchant=row.raw_description,
-            category_id=uncat_id,
-            resolution="uncategorized",
-        )
-
-    category_id = _resolve_category_id(conn, result.category)
-    # Persist on miss so future imports block redundant LLM cycles.
-    repo.put_cache(conn, row.raw_description, result.clean_merchant, category_id)
-    return Categorized(
-        clean_merchant=result.clean_merchant,
-        category_id=category_id,
-        resolution="llm",
+    """Resolve a single row through the tiered pipeline."""
+    results = await categorize_rows_batch(
+        conn, [row], category_names, config, llm_available=llm_available
     )
+    return results[0]
+
+
+async def _ask_model(
+    conn: sqlite3.Connection,
+    config: LLMConfig,
+    keys: list[str],
+    category_names: list[str],
+    report: dict | None,
+) -> dict[str, tuple[int, str]]:
+    """Classify unknown merchants, smallest number of calls possible.
+
+    Returns key -> (category_id, resolution). Keys the model declined or
+    answered with low confidence are simply absent.
+    """
+    decided: dict[str, tuple[int, str]] = {}
+    for start in range(0, len(keys), MERCHANT_BATCH):
+        chunk = keys[start : start + MERCHANT_BATCH]
+        try:
+            answers = await llm.classify_merchants(config, chunk, category_names)
+        except llm.ModelUnavailable as exc:
+            if report is not None:
+                report["provider_error"] = str(exc)
+                report["model_gone"] = True
+            break
+        except llm.LLMUnavailable as exc:
+            if report is not None:
+                report["provider_error"] = str(exc)
+            break
+        except llm.LLMError as exc:
+            log.info("Unusable model output for %d merchants: %s", len(chunk), exc)
+            continue
+
+        for key, answer in zip(chunk, answers, strict=False):
+            if answer is None:
+                continue
+            if answer.category == UNCATEGORIZED:
+                continue
+            if answer.confidence is not None and answer.confidence < MIN_LLM_CONFIDENCE:
+                log.info(
+                    "Discarding low-confidence guess %r for %r (%.2f)",
+                    answer.category, key, answer.confidence,
+                )
+                continue
+            category_id = _resolve_category_id(conn, answer.category)
+            repo.put_merchant_decision(
+                conn,
+                canonical_key=key,
+                display_name=answer.display_name or descriptors._titleise(key),
+                category_id=category_id,
+                source="llm",
+                confidence=answer.confidence,
+            )
+            decided[key] = (category_id, "llm")
+    return decided
 
 
 async def categorize_rows_batch(
@@ -92,117 +167,55 @@ async def categorize_rows_batch(
     llm_available: bool = True,
     report: dict | None = None,
 ) -> list[Categorized]:
-    """Resolve many rows at once: cache-first, then ONE LLM call for the misses.
-
-    Batching cuts a 500-row import from ~500 model calls to ~20. Rows the batch
-    response fails to cover fall back to individual calls; anything still
-    unresolved degrades to Uncategorized. Returns results aligned with ``rows``.
+    """Resolve many rows: deterministic tiers first, one model pass for the rest.
 
     Pass ``report`` (a dict) to learn *why* rows went unresolved: on a provider
-    failure it receives ``provider_error``, so the caller can surface a real
-    message instead of silently returning a pile of Uncategorized rows.
+    failure it receives ``provider_error`` (and ``model_gone`` when the model id
+    is retired), so the caller can surface a real message instead of silently
+    returning a pile of Uncategorized rows.
     """
-    results: list[Categorized | None] = [None] * len(rows)
-    uncat_id = _resolve_category_id(conn, UNCATEGORIZED)
+    if not rows:
+        return []
 
-    def uncategorized_for(row: ParsedRow) -> Categorized:
-        return Categorized(
-            clean_merchant=row.raw_description,
-            category_id=uncat_id,
-            resolution="uncategorized",
-        )
+    uncategorized_id = _resolve_category_id(conn, UNCATEGORIZED)
+    normalized = [descriptors.normalize(r.raw_description) for r in rows]
+    resolved: list[tuple[int, str] | None] = []
+    unknown: list[str] = []
 
-    # Pass 1: cache hits (and duplicate descriptors within this same batch).
-    misses: list[int] = []
-    for i, row in enumerate(rows):
-        cached = repo.get_cache(conn, row.raw_description)
-        if cached is not None:
-            results[i] = Categorized(
-                clean_merchant=cached["clean_merchant"],
-                category_id=cached["category_id"],
-                resolution="cache",
-            )
-        else:
-            misses.append(i)
+    for descriptor, row in zip(normalized, rows, strict=False):
+        outcome = _deterministic(conn, descriptor.key, row.amount)
+        resolved.append(outcome)
+        if outcome is None and descriptor.key not in unknown:
+            unknown.append(descriptor.key)
 
-    if not misses or not llm_available or config is None:
-        for i in misses:
-            results[i] = uncategorized_for(rows[i])
-        return [r for r in results if r is not None]
+    if unknown and llm_available and config is not None:
+        decided = await _ask_model(conn, config, unknown, category_names, report)
+        if decided:
+            for i, (descriptor, outcome) in enumerate(
+                zip(normalized, resolved, strict=False)
+            ):
+                if outcome is None and descriptor.key in decided:
+                    resolved[i] = decided[descriptor.key]
 
-    # Pass 2: one model call for the unique missing descriptors.
-    unique: list[str] = []
-    index_of: dict[str, int] = {}
-    for i in misses:
-        raw = rows[i].raw_description
-        if raw not in index_of:
-            index_of[raw] = len(unique)
-            unique.append(raw)
-
-    provider_error: str | None = None
-    try:
-        batch = await llm.clean_merchants_batch(config, unique, category_names)
-    except llm.ModelUnavailable as exc:
-        # The model id is retired. Distinct from an outage: the caller can fix
-        # this by switching models and replaying, so say so explicitly. Must be
-        # caught before LLMUnavailable, which it subclasses.
-        provider_error = str(exc)
-        if report is not None:
-            report["model_gone"] = True
-        batch = [None] * len(unique)
-    except llm.LLMUnavailable as exc:
-        # The endpoint refused us (rate limit / auth / outage). Retrying each
-        # row individually would multiply the load against a provider that is
-        # already saying no, so skip pass 3 and report why nothing resolved.
-        provider_error = str(exc)
-        batch = [None] * len(unique)
-    except llm.LLMError:
-        batch = [None] * len(unique)
-
-    if report is not None and provider_error:
-        report["provider_error"] = provider_error
-
-    for i in misses:
-        row = rows[i]
-        outcome = batch[index_of[row.raw_description]]
+    results: list[Categorized] = []
+    for descriptor, outcome in zip(normalized, resolved, strict=False):
         if outcome is None:
-            if provider_error:
-                results[i] = uncategorized_for(row)
-                continue
-            # Pass 3: individual retry for stragglers the batch missed.
-            try:
-                outcome = await llm.clean_merchant(
-                    config, row.raw_description, category_names
+            results.append(
+                Categorized(
+                    clean_merchant=descriptor.display,
+                    category_id=uncategorized_id,
+                    resolution="uncategorized",
+                    canonical_key=descriptor.key,
                 )
-            except llm.ModelUnavailable as exc:
-                provider_error = str(exc)
-                if report is not None:
-                    report["provider_error"] = provider_error
-                    report["model_gone"] = True
-                results[i] = uncategorized_for(row)
-                continue
-            except llm.LLMUnavailable as exc:
-                provider_error = str(exc)
-                if report is not None:
-                    report["provider_error"] = provider_error
-                results[i] = uncategorized_for(row)
-                continue
-            except llm.LLMError:
-                results[i] = uncategorized_for(row)
-                continue
-        # First resolution of a descriptor writes the cache; later duplicates
-        # in this batch resolve from it via get_cache on their own imports.
-        if repo.get_cache(conn, row.raw_description) is None:
-            category_id = _resolve_category_id(conn, outcome.category)
-            repo.put_cache(
-                conn, row.raw_description, outcome.clean_merchant, category_id
             )
         else:
-            category_id = _resolve_category_id(conn, outcome.category)
-        results[i] = Categorized(
-            clean_merchant=outcome.clean_merchant,
-            category_id=category_id,
-            resolution="llm",
-        )
-
-    return [r for r in results if r is not None]
+            category_id, resolution = outcome
+            results.append(
+                Categorized(
+                    clean_merchant=descriptor.display,
+                    category_id=category_id,
+                    resolution=resolution,
+                    canonical_key=descriptor.key,
+                )
+            )
+    return results

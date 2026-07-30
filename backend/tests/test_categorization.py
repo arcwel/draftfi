@@ -18,31 +18,46 @@ CONFIG = LLMConfig(
 
 @pytest.mark.asyncio
 async def test_miss_then_hit(conn, monkeypatch):
-    async def fake_clean(config, raw, cats, retries=1):
-        return llm.CleanResult(clean_merchant="Amazon", category="Shopping")
+    """An unknown merchant is asked once, then answered from the memo forever.
 
-    monkeypatch.setattr(llm, "clean_merchant", fake_clean)
+    Uses a merchant the seeded rules do NOT know — a known one resolves without
+    any model call, which is a different (also tested) path.
+    """
+    async def fake_classify(config, merchants, cats):
+        return [
+            llm.MerchantVerdict(
+                merchant="Zephyr Cycles", category="Shopping", confidence=0.9
+            )
+            for _ in merchants
+        ]
+
+    monkeypatch.setattr(llm, "classify_merchants", fake_classify)
     names = [c["name"] for c in repo.list_categories(conn)]
-    row = ParsedRow("2026-01-01", "AMZN MKTP US*2A34M1", -42.19, "Chase")
+    row = ParsedRow("2026-01-01", "ZEPHYR CYCLES *2A34M1 PORTLAND OR", -42.19, "Chase")
 
-    # First pass: cache miss -> LLM -> tagged 'llm' and written to cache.
     first = await categorization.categorize_row(
         conn, row, names, CONFIG, llm_available=True
     )
     assert first.resolution == "llm"
-    assert first.clean_merchant == "Amazon"
-    assert repo.get_cache(conn, row.raw_description) is not None
+    assert first.clean_merchant == "Zephyr Cycles"
+    # The decision is recorded against the canonical merchant, not the raw
+    # string — that is what makes it reusable across descriptor variants.
+    decision = repo.get_merchant_decision(conn, first.canonical_key)
+    assert decision is not None
+    assert decision["source"] == "llm"
 
-    # Second pass: cache hit, no LLM needed.
     def boom(*a, **k):
-        raise AssertionError("LLM should not be called on a cache hit")
+        raise AssertionError("LLM should not be called once a decision exists")
 
-    monkeypatch.setattr(llm, "clean_merchant", boom)
+    monkeypatch.setattr(llm, "classify_merchants", boom)
+
+    # A *different* raw spelling of the same merchant also resolves for free.
+    variant = ParsedRow("2026-02-02", "ZEPHYR CYCLES *99XQ7 PORTLAND OR", -8.0, "Chase")
     second = await categorization.categorize_row(
-        conn, row, names, CONFIG, llm_available=True
+        conn, variant, names, CONFIG, llm_available=True
     )
     assert second.resolution == "cache"
-    assert second.clean_merchant == "Amazon"
+    assert second.clean_merchant == "Zephyr Cycles"
 
 
 @pytest.mark.asyncio

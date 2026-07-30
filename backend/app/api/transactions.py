@@ -20,6 +20,7 @@ from app.models.schemas import (
     TransactionPage,
     TransactionUpdate,
 )
+from app.services import descriptors
 
 router = APIRouter(tags=["transactions"])
 
@@ -151,8 +152,10 @@ def override_category(
 ) -> Transaction:
     """Override a transaction's category and sync the rule globally.
 
-    Updates the cache mapping for the raw descriptor and re-tags every past &
-    future transaction with the same raw string (PRD 6.1 User Override Sync).
+    The correction is recorded against the *canonical merchant*, not the raw
+    descriptor, and marked ``source='user'`` so no automatic pass can ever
+    overwrite it. That means fixing one "AMAZON KIDS *B26ME6RT2 WA" row fixes
+    every Amazon Kids row, past and future (PRD 6.1 User Override Sync).
     """
     tx = repo.get_transaction(conn, tx_id)
     if tx is None:
@@ -162,11 +165,25 @@ def override_category(
         raise HTTPException(status_code=400, detail="Unknown category id.")
 
     raw = tx["raw_description"]
-    clean = tx.get("clean_merchant") or raw
-    # Cache write mirrors the choice for all future imports of this raw string.
-    repo.put_cache(conn, raw, clean, body.category_id)
-    # Propagate to all existing rows sharing the descriptor.
-    repo.apply_category_to_raw(conn, raw, body.category_id)
+    descriptor = descriptors.normalize(raw)
+    key = tx.get("canonical_key") or descriptor.key
+    clean = tx.get("clean_merchant") or descriptor.display
+    repo.put_merchant_decision(
+        conn,
+        canonical_key=key,
+        display_name=clean,
+        category_id=body.category_id,
+        source="user",
+        confidence=1.0,
+    )
+    # Backfill the key on rows that predate migration 9 so propagation reaches
+    # them too, then apply to every transaction for this merchant.
+    conn.execute(
+        "UPDATE transactions SET canonical_key = ? "
+        "WHERE canonical_key IS NULL AND raw_description = ?",
+        (key, raw),
+    )
+    repo.apply_category_to_key(conn, key, body.category_id)
     conn.commit()
 
     updated = repo.get_transaction(conn, tx_id)

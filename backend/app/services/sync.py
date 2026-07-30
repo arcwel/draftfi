@@ -137,20 +137,29 @@ async def _run(conn: sqlite3.Connection, job: SyncJob) -> None:
                 continue
 
         for tx, outcome in zip(chunk, outcomes, strict=False):
-            if outcome.resolution in ("cache", "llm"):
+            # Anything but "uncategorized" is a real resolution now: rules and
+            # transfer detection resolve without any model call at all.
+            if outcome.resolution != "uncategorized":
                 repo.apply_categorization(
                     conn,
                     int(tx["id"]),
                     outcome.category_id,
                     outcome.clean_merchant,
                     outcome.resolution,
+                    canonical_key=outcome.canonical_key,
                 )
                 job.recategorized += 1
-                if outcome.resolution == "cache":
-                    job.cache_hits += 1
-                else:
+                if outcome.resolution == "llm":
                     job.llm_cleaned += 1
+                else:
+                    # Cache, rule, transfer, override — all free.
+                    job.cache_hits += 1
             else:
+                # Still record the key so a later override can reach this row.
+                if outcome.canonical_key:
+                    repo.set_canonical_key(
+                        conn, int(tx["id"]), outcome.canonical_key
+                    )
                 job.still_uncategorized += 1
             job.processed += 1
         category_names = [c["name"] for c in repo.list_categories(conn)]

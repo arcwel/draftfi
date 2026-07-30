@@ -476,6 +476,96 @@ async def _generate_with_retry(
     raise last if last is not None else LLMError("LLM failed")  # pragma: no cover
 
 
+# Classifying a *merchant name* is a different, much easier task than
+# classifying a raw descriptor: the noise is already gone, and one answer covers
+# every transaction for that merchant. The model is also given an explicit way
+# to abstain, because benchmarks show it will otherwise invent a confident
+# answer for merchants it does not recognise.
+MERCHANT_SYSTEM_PROMPT = (
+    "You assign spending categories to merchant names from a bank statement. "
+    "For each numbered merchant, choose the single best category from this "
+    "list: __CATEGORIES__. "
+    "Respond with ONLY a JSON object of the exact form: "
+    '{"items": [{"i": 1, "merchant": "...", "category": "...", '
+    '"confidence": 0.0}, ...]} '
+    "with one element per input line, using each line's number as \"i\". "
+    "\"merchant\" is a clean, human-readable name for the business. "
+    "\"category\" MUST be copied exactly from the list above. "
+    "\"confidence\" is 0.0-1.0 for how sure you are. "
+    "If you do not recognise the merchant or cannot tell what it sells, use "
+    "the category \"Uncategorized\" with a low confidence rather than "
+    "guessing. Do not include markdown, code fences, or explanation."
+)
+
+
+@dataclass
+class MerchantVerdict:
+    merchant: str
+    category: str
+    confidence: float | None = None
+
+    @property
+    def display_name(self) -> str:
+        return self.merchant
+
+
+def parse_merchant_json(text: str, count: int) -> list[MerchantVerdict | None]:
+    """Parse a merchant-classification response into an index-aligned list."""
+    candidate = text.strip()
+    if candidate.startswith("```"):
+        candidate = candidate.strip("`")
+        candidate = re.sub(r"^json\s*", "", candidate, flags=re.IGNORECASE).strip()
+    try:
+        data = json.loads(candidate)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise LLMError(f"Unparseable merchant output: {text[:200]!r}") from exc
+    items = data.get("items") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        raise LLMError(f"Merchant output missing 'items': {text[:200]!r}")
+
+    results: list[MerchantVerdict | None] = [None] * count
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            idx = int(item.get("i", 0)) - 1
+        except (TypeError, ValueError):
+            continue
+        if not (0 <= idx < count):
+            continue
+        category = str(item.get("category", "")).strip()
+        if not category:
+            continue
+        try:
+            confidence = float(item["confidence"]) if "confidence" in item else None
+        except (TypeError, ValueError):
+            confidence = None
+        results[idx] = MerchantVerdict(
+            merchant=str(item.get("merchant", "")).strip(),
+            category=category,
+            confidence=confidence,
+        )
+    return results
+
+
+async def classify_merchants(
+    config: LLMConfig,
+    merchants: list[str],
+    categories: list[str],
+) -> list[MerchantVerdict | None]:
+    """Assign a category to each canonical merchant name in ONE model call."""
+    if not merchants:
+        return []
+    system = MERCHANT_SYSTEM_PROMPT.replace("__CATEGORIES__", ", ".join(categories))
+    lines = "\n".join(f'{i + 1}. "{m}"' for i, m in enumerate(merchants))
+    prompt = f"Merchants:\n{lines}"
+    try:
+        text = await _generate_with_retry(config, prompt, system)
+    except httpx.HTTPError as exc:
+        raise _endpoint_error(exc) from exc
+    return parse_merchant_json(text, len(merchants))
+
+
 BATCH_SYSTEM_PROMPT = (
     "You are a financial transaction normalizer. You receive a numbered list "
     "of raw bank statement descriptors. For each one, identify the real-world "

@@ -50,7 +50,85 @@ def upsert_category(conn: sqlite3.Connection, name: str, color: str = "#64748B")
 
 
 # --------------------------------------------------------------------------- #
-# Merchant LLM cache
+# Merchant decisions (canonical-key memo)
+# --------------------------------------------------------------------------- #
+def get_merchant_decision(
+    conn: sqlite3.Connection, canonical_key: str
+) -> dict[str, Any] | None:
+    """The standing decision for a merchant, or None."""
+    return _row(
+        conn.execute(
+            "SELECT * FROM merchant_category WHERE canonical_key = ?",
+            (canonical_key,),
+        ).fetchone()
+    )
+
+
+def put_merchant_decision(
+    conn: sqlite3.Connection,
+    *,
+    canonical_key: str,
+    display_name: str,
+    category_id: int | None,
+    source: str = "llm",
+    confidence: float | None = None,
+) -> None:
+    """Record a merchant decision.
+
+    A ``user`` decision is never overwritten by an automatic one — that is the
+    guarantee that makes a manual correction permanent. Anything else upserts.
+    """
+    conn.execute(
+        "INSERT INTO merchant_category "
+        "(canonical_key, display_name, category_id, source, confidence, decided_at) "
+        "VALUES (?, ?, ?, ?, ?, datetime('now')) "
+        "ON CONFLICT(canonical_key) DO UPDATE SET "
+        "  display_name = excluded.display_name, "
+        "  category_id  = excluded.category_id, "
+        "  source       = excluded.source, "
+        "  confidence   = excluded.confidence, "
+        "  decided_at   = excluded.decided_at "
+        "WHERE merchant_category.source != 'user' OR excluded.source = 'user'",
+        (canonical_key, display_name, category_id, source, confidence),
+    )
+
+
+def apply_category_to_key(
+    conn: sqlite3.Connection, canonical_key: str, category_id: int
+) -> int:
+    """Apply a category to every transaction sharing a canonical merchant.
+
+    Broader than the old raw-descriptor propagation on purpose: correcting one
+    "AMAZON KIDS *B26ME6RT2" row now fixes every Amazon Kids row, not just the
+    ones with that exact reference id.
+    """
+    cur = conn.execute(
+        "UPDATE transactions SET category_id = ?, resolution = 'override' "
+        "WHERE canonical_key = ?",
+        (category_id, canonical_key),
+    )
+    return cur.rowcount
+
+
+def set_canonical_key(
+    conn: sqlite3.Connection, tx_id: int, canonical_key: str
+) -> None:
+    conn.execute(
+        "UPDATE transactions SET canonical_key = ? WHERE id = ?",
+        (canonical_key, tx_id),
+    )
+
+
+def merchant_decision_counts(conn: sqlite3.Connection) -> dict[str, int]:
+    """Decisions grouped by source — the "how much did we avoid asking" metric."""
+    rows = conn.execute(
+        "SELECT source, COUNT(*) AS n FROM merchant_category GROUP BY source"
+    ).fetchall()
+    return {r["source"]: int(r["n"]) for r in rows}
+
+
+# --------------------------------------------------------------------------- #
+# Merchant LLM cache (legacy, raw-descriptor keyed — read for migration only)
 # --------------------------------------------------------------------------- #
 def get_cache(conn: sqlite3.Connection, raw_description: str) -> dict[str, Any] | None:
     return _row(
@@ -348,8 +426,21 @@ def apply_categorization(
     category_id: int | None,
     clean_merchant: str,
     resolution: str,
+    canonical_key: str | None = None,
 ) -> None:
-    """Write a freshly-resolved categorization onto an existing transaction."""
+    """Write a freshly-resolved categorization onto an existing transaction.
+
+    Stores the canonical merchant key alongside it when known, so a later user
+    override can propagate across every spelling of that merchant without
+    re-normalizing the table.
+    """
+    if canonical_key:
+        conn.execute(
+            "UPDATE transactions SET category_id = ?, clean_merchant = ?, "
+            "resolution = ?, canonical_key = ? WHERE id = ?",
+            (category_id, clean_merchant, resolution, canonical_key, tx_id),
+        )
+        return
     conn.execute(
         "UPDATE transactions SET category_id = ?, clean_merchant = ?, "
         "resolution = ? WHERE id = ?",
@@ -409,6 +500,9 @@ def monthly_series(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             "SUM(t.amount) AS total, COUNT(t.id) AS n "
             "FROM transactions t LEFT JOIN categories c ON t.category_id = c.id "
             "WHERE t.is_split_parent = 0 AND t.date IS NOT NULL "
+            # Transfers move money between the user's own accounts; counting
+            # them would double-count the spending they settle.
+            "AND COALESCE(c.is_transfer, 0) = 0 "
             "GROUP BY ym, t.category_id ORDER BY ym"
         ).fetchall()
     )
@@ -427,6 +521,7 @@ def category_breakdown_for_month(
             "FROM categories c "
             "JOIN transactions t ON t.category_id = c.id "
             "WHERE t.is_split_parent = 0 AND substr(t.date, 1, 7) = ? "
+            "AND COALESCE(c.is_transfer, 0) = 0 "
             "GROUP BY c.id ORDER BY SUM(t.amount) ASC",
             (month,),
         ).fetchall()
@@ -456,6 +551,7 @@ def category_breakdown(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             "FROM categories c "
             "JOIN transactions t ON t.category_id = c.id "
             "WHERE t.is_split_parent = 0 "
+            "AND COALESCE(c.is_transfer, 0) = 0 "
             "GROUP BY c.id "
             "ORDER BY SUM(t.amount) ASC"
         ).fetchall()

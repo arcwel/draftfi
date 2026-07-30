@@ -106,6 +106,9 @@ def build_app(dist_dir: Path) -> None:
     finally:
         shutil.rmtree(staged, ignore_errors=True)
 
+    if sys.platform == "darwin":
+        _codesign(dist_dir / f"{APP_NAME}.app")
+
     print(f"\n[OK] Built {APP_NAME} into {dist_dir}", flush=True)
     if sys.platform == "darwin":
         print(f"  -> {dist_dir / (APP_NAME + '.app')}")
@@ -120,6 +123,46 @@ def _icon_path() -> Path | None:
     name = "DraftFi.icns" if sys.platform == "darwin" else "DraftFi.ico"
     p = icons / name
     return p if p.exists() else None
+
+
+# macOS grants keychain access per *code signature*. PyInstaller ad-hoc signs,
+# and an ad-hoc hash changes with the binary, so every rebuild looked like a
+# brand-new application and re-prompted for the stored API key. Signing with a
+# stable identity fixes that permanently. DRAFTFI_SIGN_IDENTITY names the
+# identity (see packaging/make_signing_identity.sh); unset, we fall back to
+# ad-hoc and warn.
+SIGN_IDENTITY_ENV = "DRAFTFI_SIGN_IDENTITY"
+DEFAULT_SIGN_IDENTITY = "DraftFi Local Signing"
+
+
+def _codesign(app_path: Path) -> None:
+    if sys.platform != "darwin" or not app_path.exists():
+        return
+    identity = os.environ.get(SIGN_IDENTITY_ENV, DEFAULT_SIGN_IDENTITY)
+    available = subprocess.run(
+        ["security", "find-identity", "-v", "-p", "codesigning"],
+        capture_output=True, text=True, check=False,
+    ).stdout
+    if identity not in available:
+        print(
+            f"[warn] signing identity {identity!r} not found — leaving the "
+            "ad-hoc signature in place.\n"
+            "       macOS will re-prompt for keychain access after every "
+            "rebuild until you create one:\n"
+            "         bash packaging/make_signing_identity.sh"
+        )
+        return
+    result = subprocess.run(
+        [
+            "codesign", "--force", "--deep", "--timestamp=none",
+            "--sign", identity, str(app_path),
+        ],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        print(f"[warn] codesign failed, keeping ad-hoc signature:\n{result.stderr}")
+        return
+    print(f"[OK] Signed with {identity!r} — keychain access will persist.")
 
 
 def main() -> None:

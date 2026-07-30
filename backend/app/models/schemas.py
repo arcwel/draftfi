@@ -6,7 +6,16 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-Resolution = Literal["cache", "llm", "override", "uncategorized", "manual", "split"]
+Resolution = Literal[
+    "cache",
+    "llm",
+    "rule",       # matched a seeded merchant rule — deterministic, free
+    "transfer",   # detected as money movement, not spending
+    "override",
+    "uncategorized",
+    "manual",
+    "split",
+]
 
 
 class Category(BaseModel):

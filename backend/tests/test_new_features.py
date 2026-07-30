@@ -182,11 +182,14 @@ def test_import_uses_one_batch_call_per_chunk(client, monkeypatch):
     async def fake_health(config):
         return True, 5.0, None
 
-    async def fake_batch(config, raws, cats):
+    asked: list[str] = []
+
+    async def fake_classify(config, merchants, cats):
         calls["batch"] += 1
+        asked.extend(merchants)
         return [
-            llm.CleanResult(clean_merchant=f"M{i}", category="Shopping")
-            for i in range(len(raws))
+            llm.MerchantVerdict(merchant=m.title(), category="Shopping", confidence=0.9)
+            for m in merchants
         ]
 
     async def fake_single(config, raw, cats, retries=1):
@@ -194,11 +197,24 @@ def test_import_uses_one_batch_call_per_chunk(client, monkeypatch):
         return llm.CleanResult(clean_merchant="X", category="Shopping")
 
     monkeypatch.setattr(llm, "health", fake_health)
-    monkeypatch.setattr(llm, "clean_merchants_batch", fake_batch)
+    monkeypatch.setattr(llm, "classify_merchants", fake_classify)
     monkeypatch.setattr(llm, "clean_merchant", fake_single)
 
+    # Distinct alphabetic merchants: "VENDOR 12" would normalize to "VENDOR"
+    # for every row (the number is stripped as noise), which is the dedup
+    # working but makes this a one-merchant test instead of a batching one.
+    # Purely alphabetic and distinct: a token mixing letters and digits (e.g.
+    # "A26RDIGAN") is stripped as a reference id, which would collapse every row
+    # onto one merchant — correct behaviour, wrong test.
+    words = (
+        "ALDER BIRCH CEDAR DOGWOOD ELM FIR GINKGO HAWTHORN IRONWOOD JUNIPER "
+        "KATSURA LARCH MAPLE NUTMEG OLIVE PAWPAW QUINCE ROWAN SPRUCE TUPELO "
+        "UMBRELLA VIBURNUM WALNUT XYLOSMA YEW ZELKOVA ACACIA BASSWOOD "
+        "CATALPA DEODAR"
+    ).split()
+    merchants = [f"{w} TRADING CO" for w in words]
     rows = "\n".join(
-        f"2026-06-{(i % 27) + 1:02d},VENDOR {i},-{10 + i}.00" for i in range(30)
+        f"2026-06-{(i % 27) + 1:02d},{merchants[i]},-{10 + i}.00" for i in range(30)
     )
     csv_bytes = ("Date,Description,Amount\n" + rows).encode()
     r = client.post(
@@ -213,6 +229,14 @@ def test_import_uses_one_batch_call_per_chunk(client, monkeypatch):
     assert status["state"] == "done"
     assert status["imported"] == 30
     assert status["llm_cleaned"] == 30
-    # 30 rows with chunk size 25 → exactly 2 batch calls, zero singles.
-    assert calls["batch"] == 2
+    # The invariant that matters is not the chunk arithmetic but that no
+    # merchant is ever asked about twice — that is what the memo table buys.
+    assert len(asked) == len(set(asked)) == 30
+    # And calls carry batches rather than one merchant each. Not asserting an
+    # exact count: it depends on how the importer chunks ROWS and how those
+    # chunks divide into merchant batches, which is an implementation detail
+    # this test has no business pinning.
+    assert calls["batch"] > 0
+    assert len(asked) / calls["batch"] > 1, "merchants should be batched"
+    assert calls["batch"] < 30, "and far fewer calls than transactions"
     assert calls["single"] == 0
