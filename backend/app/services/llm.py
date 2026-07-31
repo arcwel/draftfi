@@ -48,6 +48,10 @@ class CleanResult:
     category: str
 
 
+# Distinguishes "no default given" from a default of None/""/[].
+_UNSET = object()
+
+
 class LLMError(Exception):
     """Raised when the model is unreachable or returns unusable output."""
 
@@ -365,7 +369,7 @@ async def _generate(config: LLMConfig, prompt: str, system: str) -> str:
                 },
             )
             resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
+            return _extract(config, resp, ("choices", 0, "message", "content"))
 
         if config.provider == "anthropic":
             resp = await client.post(
@@ -379,8 +383,10 @@ async def _generate(config: LLMConfig, prompt: str, system: str) -> str:
                 },
             )
             resp.raise_for_status()
-            parts = resp.json().get("content", [])
-            return parts[0]["text"] if parts else ""
+            parts = _extract(config, resp, ("content",), default=[])
+            if not parts:
+                return ""
+            return _extract(config, resp, ("content", 0, "text"), default="")
 
         if config.provider == "gemini":
             resp = await client.post(
@@ -396,12 +402,50 @@ async def _generate(config: LLMConfig, prompt: str, system: str) -> str:
                 },
             )
             resp.raise_for_status()
-            cands = resp.json().get("candidates", [])
+            cands = _extract(config, resp, ("candidates",), default=[])
             if not cands:
                 return ""
-            return cands[0]["content"]["parts"][0]["text"]
+            # A candidate blocked by a safety filter, or truncated by
+            # MAX_TOKENS, arrives with no content.parts at all. Reading
+            # ["content"]["parts"][0]["text"] raised a bare KeyError that no
+            # caller caught, so one filtered chunk ended an entire sync.
+            return _extract(
+                config, resp, ("candidates", 0, "content", "parts", 0, "text"),
+                default="",
+            )
 
     raise LLMError(f"Unknown provider: {config.provider}")  # pragma: no cover
+
+
+def _extract(config: LLMConfig, resp, path: tuple, default=_UNSET):
+    """Walk a response body defensively.
+
+    Providers do not always return the shape their docs describe. A Gemini
+    candidate blocked by a safety filter has no ``parts``; an OpenAI-compatible
+    proxy (LiteLLM, OpenRouter, LM Studio) returns ``{"error": ...}`` with HTTP
+    200; a captive portal returns HTML. Indexing straight into ``resp.json()``
+    turned each of those into a raw KeyError/JSONDecodeError that escaped every
+    handler between here and the sync job, killing the whole run on the first
+    bad chunk.
+    """
+    try:
+        node = resp.json()
+    except ValueError as exc:
+        raise LLMError(
+            f"{config.provider} returned a non-JSON response "
+            f"({resp.headers.get('content-type', 'unknown type')})."
+        ) from exc
+    try:
+        for step in path:
+            node = node[step]
+        return node
+    except (KeyError, IndexError, TypeError) as exc:
+        if default is not _UNSET:
+            return default
+        raise LLMError(
+            f"Unexpected {config.provider} response shape: missing "
+            f"{'.'.join(str(p) for p in path)}."
+        ) from exc
 
 
 # Transient conditions worth another attempt. A retired model, a bad key, or a

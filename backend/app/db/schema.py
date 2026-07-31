@@ -16,7 +16,9 @@ import sqlite3
 # imported history until manually overridden. Only chart horizons and growth
 # rates carry non-zero defaults (they're display settings, not "your data").
 BASE_PLAN_PARAMETERS: dict = {
-    "starting_cash": 0,
+    # null, not 0 — "we haven't asked yet", not "you have nothing". See the
+    # comment on SimulationParameters.starting_cash.
+    "starting_cash": None,
     "monthly_inflow": None,
     "monthly_outflow": None,
     "income_adjustment_pct": 0,
@@ -197,6 +199,29 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         UPDATE categories SET is_transfer = 1 WHERE name = 'Transfers';
         """,
     ),
+    (
+        10,
+        "distinguish an unset starting cash position from a zero one",
+        """
+        -- starting_cash used to default to 0, which the forecast could not tell
+        -- apart from "the user actually has nothing". Every plan that had never
+        -- been configured therefore projected a runway from $0 and raised
+        -- "dips below floor at month 1" for anyone spending a dollar more than
+        -- they earn — a warning about a missing input, presented as a finding
+        -- about the user's finances.
+        --
+        -- A plan whose cash, assets, debt AND safety floor are all zero has
+        -- never been filled in; anything else is a deliberate choice and is
+        -- left exactly as it is.
+        UPDATE branches
+           SET parameters = json_set(parameters, '$.starting_cash', json('null'))
+         WHERE json_valid(parameters)
+           AND COALESCE(json_extract(parameters, '$.starting_cash'), 0) = 0
+           AND COALESCE(json_extract(parameters, '$.starting_assets'), 0) = 0
+           AND COALESCE(json_extract(parameters, '$.starting_debt'), 0) = 0
+           AND COALESCE(json_extract(parameters, '$.safety_floor'), 0) = 0;
+        """,
+    ),
 ]
 
 # Default budget categories with visualization colors (Tailwind-ish hexes).
@@ -359,8 +384,8 @@ def initialize(conn: sqlite3.Connection) -> None:
     migrate_legacy_cache(conn)
     backfill_canonical_keys(conn)
     # Correct an inverted amount convention before anything reads the numbers.
-    # Safe to call every launch: it only fires when the evidence is lopsided,
-    # and after a flip the evidence reads correctly.
+    # One-shot and self-flagging: this repairs data imported before sign
+    # normalization existed. New imports are normalized at parse time instead.
     from app.services.signs import repair_existing
 
     repair_existing(conn)

@@ -41,7 +41,7 @@ def client(tmp_path, monkeypatch):
     main = importlib.import_module("app.main")
     importlib.reload(main)
     app = main.create_app()
-    with TestClient(app) as c:
+    with TestClient(app, base_url="http://127.0.0.1") as c:
         yield c
 
 

@@ -8,8 +8,11 @@ Pydantic schema, so a hallucinated shape can't corrupt a plan.
 """
 from __future__ import annotations
 
+import logging
 import sqlite3
 from datetime import date
+
+from pydantic import ValidationError
 
 from app.models.schemas import (
     Milestone,
@@ -17,6 +20,8 @@ from app.models.schemas import (
     SimulationParameters,
 )
 from app.services import llm, llm_config
+
+log = logging.getLogger("draftfi.scenario")
 
 # Parameter keys the model may override; anything else is dropped.
 ALLOWED_PARAM_KEYS = set(SimulationParameters.model_fields.keys())
@@ -82,16 +87,30 @@ async def parse_scenario(
             continue  # drop malformed milestones rather than failing the parse
 
     raw_params = data.get("parameters") or {}
-    parameters = {
+    candidate = {
         k: v
         for k, v in raw_params.items()
         if k in ALLOWED_PARAM_KEYS and isinstance(v, int | float)
     }
-    # Clamp the slider-backed field to its UI range.
-    if "income_adjustment_pct" in parameters:
-        parameters["income_adjustment_pct"] = max(
-            -30.0, min(30.0, float(parameters["income_adjustment_pct"]))
-        )
+    # Validate against the real schema instead of hand-clamping one field.
+    #
+    # Only income_adjustment_pct used to be clamped, but runway_months,
+    # macro_years and annual_inflation_pct are bounded too. A model answering
+    # "retire in 15 years" with runway_months=120 produced a value the schema
+    # rejects, and because the frontend swallows validation errors the user got
+    # a cheerful "Added 1 milestone(s)" followed by a forecast, a budget panel
+    # and an autosave that all silently stopped working until a reload.
+    #
+    # Each field is checked on its own so one out-of-range value costs that
+    # field, not the whole scenario.
+    parameters: dict[str, float] = {}
+    for key, value in candidate.items():
+        try:
+            SimulationParameters(**{key: value})
+        except ValidationError:
+            log.info("Dropping out-of-range scenario parameter %s=%r", key, value)
+            continue
+        parameters[key] = value
 
     note = data.get("note")
     return ScenarioParseResult(

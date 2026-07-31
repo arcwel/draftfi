@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from app.db import repository as repo
 from app.models.schemas import (
     ChangeEvent,
     MacroPoint,
@@ -30,21 +31,15 @@ from app.models.schemas import (
 def derive_baseline(conn: sqlite3.Connection) -> tuple[float, float]:
     """Infer monthly (inflow, outflow) from historical transactions.
 
-    Positive amounts are treated as inflows, negative as outflows. Totals are
-    averaged across the number of distinct calendar months observed so a single
-    large statement does not distort the monthly rate.
+    Delegates to ``repo.run_rate`` rather than running its own query. It used to
+    have one, over a different population: it counted transfers, which every
+    other aggregate excludes because a card payment settles spending that was
+    already counted. The result was that the runway chart and the budget panel
+    beside it disagreed about the same history by roughly threefold — the chart
+    showed −$167/mo against the budget page's −$494/mo.
     """
-    rows = conn.execute(
-        "SELECT amount, substr(date, 1, 7) AS ym FROM transactions "
-        "WHERE is_split_parent = 0"
-    ).fetchall()
-    if not rows:
-        return 0.0, 0.0
-    months = {r["ym"] for r in rows if r["ym"]} or {"one"}
-    n_months = max(1, len(months))
-    inflow = sum(r["amount"] for r in rows if r["amount"] > 0)
-    outflow = sum(-r["amount"] for r in rows if r["amount"] < 0)
-    return inflow / n_months, outflow / n_months
+    inflow, outflow, _months = repo.run_rate(conn)
+    return inflow, outflow
 
 
 def _monthly_milestone_costs(milestones: list[Milestone], month: int) -> float:
@@ -99,7 +94,8 @@ def run_simulation(
 
     # --- Tactical runway ------------------------------------------------- #
     runway: list[RunwayPoint] = []
-    cash = params.starting_cash
+    cash_known = params.starting_cash is not None
+    cash = params.starting_cash or 0.0
     failure_month: int | None = None
     for t in range(params.runway_months + 1):
         milestone_cost = _monthly_milestone_costs(milestones, t)
@@ -109,7 +105,11 @@ def run_simulation(
             cash = cash + inflow - outflow - milestone_cost
         else:
             cash = cash - _monthly_milestone_costs(milestones, 0)
-        below = cash < params.safety_floor
+        # Without a real starting balance the curve's shape is meaningful but
+        # its level is not, so nothing gets flagged as a breach. Claiming a
+        # user is out of money because we assumed they started at zero is a
+        # false alarm dressed up as a finding.
+        below = cash_known and cash < params.safety_floor
         if below and failure_month is None:
             failure_month = t
         runway.append(RunwayPoint(month=t, cash=round(cash, 2), below_floor=below))
@@ -123,32 +123,59 @@ def run_simulation(
     monthly_inflation = (1.0 + params.annual_inflation_pct / 100.0) ** (1 / 12) - 1
     total_months = params.macro_years * 12
 
-    assets = params.starting_assets
+    # Starting cash IS part of net worth. Leaving it out meant a user with
+    # $25,000 in the bank and $50,000 in investments saw a year-0 net worth of
+    # $50,000, and every net-worth goal was judged against a figure missing
+    # their most liquid asset.
+    assets = params.starting_assets + (params.starting_cash or 0.0)
     structural_debt = params.starting_debt
     # Each amortizing loan tracks its own balance, monthly rate, payment, term.
     loans: list[dict] = []
     macro: list[MacroPoint] = []
+
+    def apply_milestones(month: int) -> None:
+        """Buy whatever is scheduled for this month.
+
+        Lives outside the ``t > 0`` branch because target_month defaults to 0 —
+        the natural way to say "I'm buying this now". With the purchase inside
+        that branch the cash left the runway chart and the asset never arrived
+        in the macro chart, so a month-0 house was simply money vanishing.
+        """
+        nonlocal assets
+        for m in milestones:
+            if month != m.target_month:
+                continue
+            # The asset arrives, and the down payment that bought it leaves.
+            # Without the second half every financed purchase minted net worth
+            # out of nothing: an $80k deposit on a $400k house showed up as a
+            # $64k gain the moment it was scheduled.
+            assets += m.asset_value - m.down_payment
+            if m.debt_incurred > 0:
+                rate_pct = (
+                    m.apr if m.apr is not None else params.annual_debt_rate_pct
+                )
+                loans.append(
+                    {
+                        "balance": m.debt_incurred,
+                        "rate": (1.0 + rate_pct / 100.0) ** (1 / 12) - 1,
+                        "payment": m.recurring_payment,
+                        "end": m.target_month + m.recurring_months,
+                    }
+                )
+
+    apply_milestones(0)
     for t in range(total_months + 1):
         if t > 0:
             assets *= 1.0 + monthly_return
             structural_debt *= 1.0 + monthly_debt_rate
             inflow, outflow = flows(t)
-            assets += max(inflow - outflow, 0.0)
-            for m in milestones:
-                if t == m.target_month:
-                    assets += m.asset_value
-                    if m.debt_incurred > 0:
-                        rate_pct = (
-                            m.apr if m.apr is not None else params.annual_debt_rate_pct
-                        )
-                        loans.append(
-                            {
-                                "balance": m.debt_incurred,
-                                "rate": (1.0 + rate_pct / 100.0) ** (1 / 12) - 1,
-                                "payment": m.recurring_payment,
-                                "end": m.target_month + m.recurring_months,
-                            }
-                        )
+            # A deficit reduces net worth. The old `max(inflow - outflow, 0)`
+            # floored it at zero, so a user burning $494/mo watched the runway
+            # chart fall to zero while the macro chart beside it showed net
+            # worth compounding upward at 6% a year. Two charts, same screen,
+            # opposite stories.
+            assets += inflow - outflow
+            apply_milestones(t)
             # Amortize each loan: interest accrues, the payment retires principal.
             for loan in loans:
                 if loan["balance"] <= 0:
@@ -179,6 +206,7 @@ def run_simulation(
         macro=macro,
         failure_month=failure_month,
         safety_floor=params.safety_floor,
+        cash_position_set=cash_known,
     )
 
 

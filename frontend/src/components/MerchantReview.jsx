@@ -21,6 +21,7 @@ export default function MerchantReview({ onClose }) {
   const [active, setActive] = useState(0)
   const [saving, setSaving] = useState(false)
   const [flash, setFlash] = useState(null)
+  const [error, setError] = useState(null)
   const rowRefs = useRef({})
 
   useEffect(() => {
@@ -58,6 +59,20 @@ export default function MerchantReview({ onClose }) {
     [],
   )
 
+  // `picked` is local state, so closing throws it away. On a queue whose whole
+  // premise is making hundreds of decisions in one sitting, one stray Escape
+  // used to silently discard ten minutes of work with no undo.
+  const requestClose = useCallback(() => {
+    const count = Object.keys(picked).length
+    if (count > 0) {
+      const ok = window.confirm(
+        `Discard ${count} unsaved decision${count === 1 ? '' : 's'}?`,
+      )
+      if (!ok) return
+    }
+    onClose()
+  }, [picked, onClose])
+
   const move = useCallback(
     (delta) => {
       setActive((i) => {
@@ -74,18 +89,26 @@ export default function MerchantReview({ onClose }) {
     function onKey(event) {
       if (event.metaKey || event.ctrlKey || event.altKey) return
       const tag = event.target.tagName
-      if (tag === 'SELECT' || tag === 'INPUT') return
       const current = items[active]
 
-      if (event.key === 'Escape') return onClose()
-      if (event.key === 'ArrowDown' || event.key === 'j') {
+      if (event.key === 'Escape') return requestClose()
+
+      // Arrows are handled BEFORE the focus check, and preventDefault stops the
+      // browser's own behaviour. Previously the handler bailed whenever a
+      // <select> had focus — so once the user touched a dropdown with the
+      // mouse, ArrowDown stopped moving the cursor and started walking that
+      // merchant's category list instead, assigning "Groceries → Travel → Fees"
+      // to hundreds of transactions with the row highlight never moving.
+      if (event.key === 'ArrowDown' || (event.key === 'j' && tag !== 'SELECT')) {
         event.preventDefault()
         return move(1)
       }
-      if (event.key === 'ArrowUp' || event.key === 'k') {
+      if (event.key === 'ArrowUp' || (event.key === 'k' && tag !== 'SELECT')) {
         event.preventDefault()
         return move(-1)
       }
+      // Everything below assigns a category, so leave real form fields alone.
+      if (tag === 'SELECT' || tag === 'INPUT') return
       if (!current) return
       if (event.key === 'Enter') {
         event.preventDefault()
@@ -107,10 +130,11 @@ export default function MerchantReview({ onClose }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [items, active, palette, choose, move, onClose])
+  }, [items, active, palette, choose, move, requestClose])
 
   async function onApply() {
     setSaving(true)
+    setError(null)
     try {
       const decisions = items
         .filter((m) => picked[m.canonical_key])
@@ -126,6 +150,12 @@ export default function MerchantReview({ onClose }) {
         `Applied ${result.merchants} merchant${result.merchants === 1 ? '' : 's'} to ${result.transactions} transactions`,
       )
       setTimeout(() => setFlash(null), 4000)
+    } catch (err) {
+      // Without this the button simply returned to idle and the user had no way
+      // to tell whether 612 transactions had just been rewritten or nothing had
+      // happened at all. Keep the picked set so they can retry rather than
+      // redo ten minutes of decisions.
+      setError(err?.message || 'Could not apply these decisions. Nothing was changed.')
     } finally {
       setSaving(false)
     }
@@ -150,7 +180,7 @@ export default function MerchantReview({ onClose }) {
             </p>
           </div>
           <button
-            onClick={onClose}
+            onClick={requestClose}
             className="rounded px-2 text-gray-500 hover:text-white"
             title="Close (Esc)"
           >
@@ -232,9 +262,12 @@ export default function MerchantReview({ onClose }) {
                       <td className="px-2 py-1.5">
                         <select
                           value={chosen || m.suggested_category_id || ''}
-                          onChange={(e) =>
+                          onChange={(e) => {
                             choose(m.canonical_key, Number(e.target.value) || null)
-                          }
+                            // Hand focus back so the keyboard rhythm resumes on
+                            // the queue rather than inside this dropdown.
+                            e.target.blur()
+                          }}
                           className={`w-full rounded-md border bg-panel px-1.5 py-1 text-xs focus:outline-none ${
                             chosen
                               ? 'border-emerald-600 text-gray-100'
@@ -265,8 +298,10 @@ export default function MerchantReview({ onClose }) {
         </div>
 
         <footer className="flex items-center justify-between gap-3 border-t border-edge px-4 py-2.5">
-          <span className="text-[11px] text-gray-500">
-            {flash ? (
+          <span className="max-w-[36rem] truncate text-[11px] text-gray-500" title={error || undefined}>
+            {error ? (
+              <span className="text-rose-400">✕ {error}</span>
+            ) : flash ? (
               <span className="text-emerald-400">{flash}</span>
             ) : (
               `${decided} decided`

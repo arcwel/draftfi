@@ -31,7 +31,7 @@ def client(tmp_path, monkeypatch):
     security.lock_session()
     security._passcode_set = False
     security._unlocked = True
-    with TestClient(main.create_app()) as c:
+    with TestClient(main.create_app(), base_url="http://127.0.0.1") as c:
         yield c
 
 

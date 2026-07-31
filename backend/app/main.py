@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -80,6 +81,47 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Loopback binding is not, by itself, a security boundary. Any web page the
+    # user has open can issue requests to 127.0.0.1, and Starlette's
+    # CORSMiddleware does not block them — it only omits a response header, so
+    # a "simple" request (a form POST, a multipart upload) still reaches the
+    # handler and still runs. Verified before this existed: a cross-origin
+    # POST /reset deleted every transaction and returned 200, and a request
+    # carrying a spoofed Host header served the entire transaction history from
+    # /export/data.json after a DNS rebind.
+    #
+    # Two cheap checks close both. Neither costs anything at runtime, and
+    # neither can be satisfied by an attacker who only controls a web page.
+    _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "[::1]"}
+    _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+    def _hostname(value: str) -> str:
+        host = (value or "").strip().lower()
+        if host.startswith("["):  # bracketed IPv6
+            return host.split("]")[0] + "]"
+        return host.split(":")[0]
+
+    @app.middleware("http")
+    async def _origin_gate(request, call_next):
+        # Host: defeats DNS rebinding. After a rebind the browser considers the
+        # attacker's domain same-origin, so CORS stops helping — but the Host
+        # header still carries that domain, and ours is always loopback.
+        if _hostname(request.headers.get("host", "")) not in _LOOPBACK_HOSTS:
+            return JSONResponse(
+                {"detail": "Invalid Host header."}, status_code=421
+            )
+        # Origin: defeats CSRF. Only checked for state-changing methods, and
+        # only when present — the app's own fetches from a file/app origin may
+        # legitimately send none.
+        if request.method not in _SAFE_METHODS:
+            origin = request.headers.get("origin")
+            if origin and _hostname(urlparse(origin).netloc) not in _LOOPBACK_HOSTS:
+                return JSONResponse(
+                    {"detail": "Cross-origin requests are not allowed."},
+                    status_code=403,
+                )
+        return await call_next(request)
 
     @app.middleware("http")
     async def _passcode_gate(request, call_next):

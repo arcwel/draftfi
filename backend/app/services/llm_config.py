@@ -25,6 +25,7 @@ import os
 import re
 import sqlite3
 import threading
+import time
 from dataclasses import dataclass
 
 from app.db import repository as repo
@@ -41,6 +42,11 @@ except Exception:  # pragma: no cover - keyring not installed
 KEYRING_SERVICE = "DraftFi"
 _KEYRING_MARKER = "__keyring__"
 _keyring_state: bool | None = None
+_keyring_probed_at: float = 0.0
+# How long to sit on a failed probe before trying again. Long enough that a
+# genuinely keychain-less machine isn't probed on every request, short enough
+# that a user who just approved a dialog doesn't have to restart the app.
+KEYRING_RETRY_SECONDS = 20.0
 
 # --------------------------------------------------------------------------- #
 # Keychain access, bounded
@@ -336,25 +342,57 @@ def _key_setting(provider: str) -> str:
     return f"llm_api_key:{provider}"
 
 
-def _keyring_usable() -> bool:
-    """True when the OS keychain can round-trip a secret (probed once, cached).
+def _probe_keyring() -> bool:
+    """Round-trip a throwaway secret to see whether the keychain answers.
 
-    Set ``DRAFTFI_NO_KEYRING=1`` to force plaintext (headless servers, tests).
+    Bounded the same way reads are: macOS can park this behind an approval
+    dialog, and a probe that hangs would hang whatever request triggered it.
     """
-    global _keyring_state
-    if _keyring_state is not None:
-        return _keyring_state
+    result: dict[str, bool] = {}
+
+    def run() -> None:
+        try:
+            probe = f"{KEYRING_SERVICE}:probe"
+            keyring.set_password(KEYRING_SERVICE, probe, "1")
+            result["ok"] = keyring.get_password(KEYRING_SERVICE, probe) == "1"
+            keyring.delete_password(KEYRING_SERVICE, probe)
+        except Exception:  # pragma: no cover - keychain refused at runtime
+            result["ok"] = False
+
+    worker = threading.Thread(target=run, name="keychain:probe", daemon=True)
+    worker.start()
+    worker.join(KEYCHAIN_TIMEOUT_SECONDS)
+    # A probe still running past the deadline is parked on a dialog, which is a
+    # "not yet", not a "no".
+    return result.get("ok", False)
+
+
+def _keyring_usable() -> bool:
+    """True when the OS keychain can round-trip a secret.
+
+    A *negative* answer is deliberately not cached for the life of the process.
+    The probe fails while macOS is holding an approval dialog open — and the
+    first launch after the app's signature changes is exactly when that happens.
+    Caching that "no" meant the stored key stayed invisible for the whole
+    session: the user clicked Always Allow, the dialog went away, and the app
+    still reported "no API key configured" until it was restarted. Observed for
+    real on the 2.0.5 build.
+
+    So only the structurally impossible cases are permanent (no keyring module,
+    or ``DRAFTFI_NO_KEYRING=1`` for headless servers and tests). A failed probe
+    is re-tried after a cooldown.
+    """
+    global _keyring_state, _keyring_probed_at
     if keyring is None or os.environ.get("DRAFTFI_NO_KEYRING"):
         _keyring_state = False
         return False
-    try:
-        probe = f"{KEYRING_SERVICE}:probe"
-        keyring.set_password(KEYRING_SERVICE, probe, "1")
-        ok = keyring.get_password(KEYRING_SERVICE, probe) == "1"
-        keyring.delete_password(KEYRING_SERVICE, probe)
-        _keyring_state = bool(ok)
-    except Exception:
-        _keyring_state = False
+    if _keyring_state:  # a working keychain does not stop working
+        return True
+    now = time.monotonic()
+    if _keyring_state is False and now - _keyring_probed_at < KEYRING_RETRY_SECONDS:
+        return False
+    _keyring_probed_at = now
+    _keyring_state = _probe_keyring()
     return _keyring_state
 
 

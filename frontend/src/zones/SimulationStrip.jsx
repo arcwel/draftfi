@@ -81,11 +81,18 @@ export default function SimulationStrip() {
         onChange={(v) => setParam('starting_debt', v)}
         format={money}
       />
+      {/* The one input the forecast cannot derive: statements record flows, not
+          balances. Blank shows as "Not set" rather than $0, because a runway
+          drawn from an assumed zero balance is a guess wearing a chart. */}
       <ParamChip
         label="Cash"
         value={parameters.starting_cash}
         onChange={(v) => setParam('starting_cash', v)}
         format={money}
+        allowAuto
+        autoLabel="Not set"
+        autoHint="Your current bank balance. The runway can't be computed without it."
+        highlightWhenAuto
       />
       <ParamChip
         label="Safety floor"
@@ -199,15 +206,28 @@ export default function SimulationStrip() {
   )
 }
 
-function ParamChip({ label, value, onChange, format, allowAuto = false }) {
+function ParamChip({
+  label,
+  value,
+  onChange,
+  format,
+  allowAuto = false,
+  // "Auto" is right for income/spending, which really are derived from
+  // history. It is wrong for cash, which nothing can derive — that one is
+  // simply missing, and should say so.
+  autoLabel = 'Auto',
+  autoHint,
+  highlightWhenAuto = false,
+}) {
   const [editing, setEditing] = useState(false)
   const isAuto = allowAuto && (value === null || value === undefined)
+  const needsInput = isAuto && highlightWhenAuto
   return editing ? (
     <input
       autoFocus
       type="number"
       defaultValue={isAuto ? '' : value}
-      placeholder={allowAuto ? 'auto' : ''}
+      placeholder={allowAuto ? autoLabel.toLowerCase() : ''}
       onBlur={(e) => {
         const raw = e.target.value.trim()
         onChange(raw === '' && allowAuto ? null : Number(raw))
@@ -219,12 +239,22 @@ function ParamChip({ label, value, onChange, format, allowAuto = false }) {
   ) : (
     <button
       onClick={() => setEditing(true)}
-      className="rounded-md border border-edge bg-panel px-2.5 py-1 text-xs"
-      title={allowAuto ? 'Blank = derive from imported transactions' : undefined}
+      className={`rounded-md border px-2.5 py-1 text-xs ${
+        needsInput
+          ? 'border-amber-600 bg-amber-950/40 hover:border-amber-400'
+          : 'border-edge bg-panel'
+      }`}
+      title={
+        autoHint || (allowAuto ? 'Blank = derive from imported transactions' : undefined)
+      }
     >
       <span className="text-gray-500">{label}: </span>
-      <span className={`font-medium ${isAuto ? 'text-gray-500' : 'text-gray-200'}`}>
-        {isAuto ? 'Auto' : format(value)}
+      <span
+        className={`font-medium ${
+          needsInput ? 'text-amber-300' : isAuto ? 'text-gray-500' : 'text-gray-200'
+        }`}
+      >
+        {isAuto ? autoLabel : format(value)}
       </span>
     </button>
   )

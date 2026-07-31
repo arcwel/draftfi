@@ -29,12 +29,23 @@ from app.models.schemas import (
 )
 from app.models.schemas import Milestone as MilestoneModel
 
-# Categories treated as income rather than spend when splitting the budget.
-INCOME_CATEGORY_NAMES = {"income", "savings & investments"}
+# Categories treated as income rather than spend when labelling a bar.
+#
+# "Savings & Investments" used to be in here. It is money *leaving* — a 401k
+# contribution or a Vanguard purchase — and because the amount was then reported
+# as abs(total) and added to income, a $2,000/mo investing habit showed up as
+# $2,000 of income instead of $2,000 of outflow, a $4,000 swing in the reported
+# monthly net. It is spending of a kind you're happy about, but it is spending.
+#
+# The `or total > 0` clause is gone for the same reason: it reclassified ANY
+# category whose net happened to be positive as income, so one refund-heavy
+# month turned Shopping into an income source.
+INCOME_CATEGORY_NAMES = {"income"}
 
 
-def _is_income(name: str, total: float) -> bool:
-    return name.strip().lower() in INCOME_CATEGORY_NAMES or total > 0
+def _is_income(name: str, total: float | None = None) -> bool:
+    """Whether a category represents earnings. Identity only, never the sign."""
+    return name.strip().lower() in INCOME_CATEGORY_NAMES
 
 
 def _carried_over(
@@ -80,13 +91,25 @@ def compute_budget(
 
     for r in rows:
         total = float(r["total"])
-        income = _is_income(r["category_name"] or "", total)
+        income = _is_income(r["category_name"] or "")
         # Monthly magnitude, always presented as a positive number.
         monthly = abs(total) / divisor
+        # Each category contributes its NET to one side, chosen by what the
+        # category is rather than by the sign of the period's total.
+        #
+        # Netting matters: a refund genuinely reduces spending, so reporting
+        # gross outflow would overstate it. Classifying by identity matters
+        # too — the old code called any net-positive category "income", so one
+        # refund-heavy month turned Shopping into an income source.
+        #
+        # The two sides still sum to exactly the run-rate the forecast uses
+        # (income - expense == the net of every spendable row), which is what
+        # keeps the budget page and the runway chart in agreement.
+        signed_monthly = total / divisor
         if income:
-            total_income += monthly
+            total_income += signed_monthly
         else:
-            total_expense += monthly
+            total_expense -= signed_monthly
 
         target = r["monthly_budget"]
         has_rollover_col = "budget_rollover" in r.keys()
@@ -167,10 +190,15 @@ def compute_trends(conn: sqlite3.Connection) -> TrendsSummary:
     for r in rows:
         ym = r["ym"]
         total = float(r["total"])
-        income = _is_income(r["category_name"] or "", total)
+        income = _is_income(r["category_name"] or "")
         magnitude = abs(total)
         if ym in cash:
-            cash[ym]["income" if income else "expense"] += magnitude
+            # Same arithmetic as the budget page, so the cashflow chart and the
+            # headline numbers cannot drift apart.
+            if income:
+                cash[ym]["income"] += total
+            else:
+                cash[ym]["expense"] -= total
         cid = r["category_id"]
         if cid not in cats:
             cats[cid] = {

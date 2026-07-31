@@ -10,18 +10,27 @@ function applyTextScale(scale) {
   document.documentElement.style.fontSize = `${BASE_FONT_PX + pt}px`
 }
 
+// Timer/sequence handles live here rather than in store state: they are
+// bookkeeping, not something any component should re-render for.
+let persistTimer
+let persistSeq = 0
+
 const DEFAULT_PARAMS = {
-  starting_cash: 25000,
+  // null, not a number. These were 25000/5000/50000, which never rendered
+  // because the backend always sent explicit values that overwrote them — and
+  // inventing a plausible balance for someone is worse than admitting we don't
+  // know it. null makes the chart say "tell me" instead of guessing.
+  starting_cash: null,
   monthly_inflow: null, // null => backend derives from history
   monthly_outflow: null,
   income_adjustment_pct: 0,
-  safety_floor: 5000,
+  safety_floor: 0,
   runway_months: 36,
   macro_years: 10,
   annual_return_pct: 6,
   annual_debt_rate_pct: 5,
   annual_inflation_pct: 0,
-  starting_assets: 50000,
+  starting_assets: 0,
   starting_debt: 0,
 }
 
@@ -360,7 +369,17 @@ export const useStore = create((set, get) => ({
   setParam(key, value) {
     set({ parameters: { ...get().parameters, [key]: value } })
     get().debouncedRecompute()
-    get().persistActiveBranch()
+    // Debounced like the recompute. It was not, and it is wired to
+    // <input type="range" onChange> — so one drag of the income slider fired
+    // ~60 concurrent PATCHes and whichever RESOLVED last won, not whichever
+    // was SENT last. Drag the safety floor from 5,000 to 9,000, see 9,000,
+    // reopen tomorrow and read 5,500, with "Saved ✓" showing throughout.
+    get().debouncedPersist()
+  },
+
+  debouncedPersist() {
+    clearTimeout(persistTimer)
+    persistTimer = setTimeout(() => get().persistActiveBranch(), 400)
   },
 
   addMilestone(m) {
@@ -395,9 +414,14 @@ export const useStore = create((set, get) => ({
       set({ branchSaveState: 'idle' })
       return
     }
+    // Responses are not ordered. Without this token a save carrying an older
+    // snapshot could land after a newer one and overwrite it — in the database
+    // and in the in-memory copy — while the UI showed the newer value.
+    const seq = ++persistSeq
     set({ branchSaveState: 'saving' })
     try {
       await api.updateBranch(activeBranchId, { parameters, milestones, events })
+      if (seq !== persistSeq) return // a newer save is already in flight
       // Keep the in-memory branch in sync so switching away and back is correct.
       set({
         branchSaveState: 'saved',
@@ -406,7 +430,7 @@ export const useStore = create((set, get) => ({
         ),
       })
     } catch {
-      set({ branchSaveState: 'idle' }) // non-fatal: keep local edits
+      if (seq === persistSeq) set({ branchSaveState: 'idle' }) // keep local edits
     }
   },
 
@@ -640,9 +664,24 @@ export const useStore = create((set, get) => ({
     await get().recompute()
   },
 
+  // Pull the page back into range after anything that changes the total.
+  _clampPage() {
+    const { txPage, txPageSize, totalTransactions } = get()
+    const maxPage = Math.max(0, Math.ceil(totalTransactions / txPageSize) - 1)
+    if (txPage > maxPage) {
+      set({ txPage: maxPage })
+      return true
+    }
+    return false
+  },
+
   async deleteTransaction(txId) {
     await api.deleteTransaction(txId)
     await get().loadTransactions()
+    // Deleting the last row on the last page left txPage past the end, so the
+    // server returned an empty page and the ledger told a user with 10,370
+    // transactions "No transactions yet — import a bank CSV".
+    if (get()._clampPage()) await get().loadTransactions()
     await get().recompute()
   },
 
@@ -713,18 +752,51 @@ export const useStore = create((set, get) => ({
 
   // Poll a background job's status endpoint until it reaches a terminal state,
   // reporting progress via onProgress. Returns the final status object.
+  // One failed poll used to end the loop and return null, which the callers
+  // read as "finished with nothing to report". The job was still running: the
+  // spinner stopped, the ledger refreshed mid-write, and a needs_mapping import
+  // silently discarded the user's files. A single dropped request is normal —
+  // especially while a long import is holding the backend busy — so tolerate a
+  // run of them, and when we really do give up, say so instead of pretending.
   async _pollJob(statusFn, jobId, onProgress) {
     const TERMINAL = new Set(['done', 'error', 'needs_mapping'])
+    const MAX_CONSECUTIVE_FAILURES = 8
+    const MAX_WALL_CLOCK_MS = 30 * 60 * 1000
+    const startedAt = Date.now()
+    let failures = 0
+
     // eslint-disable-next-line no-constant-condition
     while (true) {
       let status
       try {
         status = await statusFn(jobId)
-      } catch {
-        return null
+        failures = 0
+      } catch (err) {
+        failures += 1
+        if (failures >= MAX_CONSECUTIVE_FAILURES) {
+          return {
+            state: 'error',
+            error:
+              'Lost contact with the background job. It may still be running — ' +
+              'reopen the app in a moment to see where it got to.',
+            processed: 0,
+            total: 0,
+          }
+        }
+        // Back off a little so a busy backend isn't hammered.
+        await new Promise((r) => setTimeout(r, 400 * failures))
+        continue
       }
       onProgress(status)
       if (TERMINAL.has(status.state)) return status
+      if (Date.now() - startedAt > MAX_WALL_CLOCK_MS) {
+        return {
+          state: 'error',
+          error: 'This job has been running for over 30 minutes; giving up on watching it.',
+          processed: status.processed,
+          total: status.total,
+        }
+      }
       await new Promise((r) => setTimeout(r, 400))
     }
   },
@@ -746,9 +818,14 @@ export const useStore = create((set, get) => ({
       ])
       await get().recompute()
       set({ syncResult: final })
-      setTimeout(() => {
-        if (get().syncResult === final) set({ syncResult: null })
-      }, 6000)
+      // A success message can fade; a failure has to stay until the user has
+      // seen it. Auto-dismissing an error is how a failed run ends up looking
+      // like a run that never happened.
+      if (final && final.state !== 'error') {
+        setTimeout(() => {
+          if (get().syncResult === final) set({ syncResult: null })
+        }, 6000)
+      }
     } finally {
       set({ syncing: false, syncProgress: null })
     }

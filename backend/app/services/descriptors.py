@@ -239,7 +239,9 @@ def apply_aliases(key: str) -> str:
     if key in MERCHANT_ALIASES:
         return MERCHANT_ALIASES[key]
     for alias in _ALIAS_KEYS:
-        if key.startswith(alias):
+        # Whole tokens only — see merchant_rules._prefix_match. A bare
+        # startswith folded "ATTORNEY SMITH LAW" onto the AT&T alias.
+        if key == alias or key.startswith(alias + " "):
             return MERCHANT_ALIASES[alias]
     return key
 

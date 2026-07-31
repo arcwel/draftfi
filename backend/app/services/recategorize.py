@@ -53,14 +53,22 @@ def apply_deterministic_repair(conn: sqlite3.Connection) -> dict[str, int]:
         "FROM transactions t "
         "LEFT JOIN categories c ON c.id = t.category_id "
         "LEFT JOIN merchant_category mc ON mc.canonical_key = t.canonical_key "
-        "WHERE t.is_split_parent = 0"
+        # parent_tx_id IS NULL excludes split *children*. They carry
+        # is_split_parent = 0 like any ordinary row, so the old filter let this
+        # pass rewrite them — silently moving $400 of a hand-split Home Depot
+        # charge out of Housing and into Shopping.
+        "WHERE t.is_split_parent = 0 AND t.parent_tx_id IS NULL"
     ).fetchall()
 
     stats = {"transfers": 0, "rules": 0, "skipped_ambiguous": 0, "protected": 0}
     category_ids: dict[str, int] = {}
 
+    # A hand-made split or a manually entered transaction is a user decision in
+    # the same sense an override is. Reconsidering either would be this pass
+    # overruling the person it works for.
+    protected_resolutions = {"override", "split", "manual"}
     for row in rows:
-        if row["resolution"] == "override" or row["memo_source"] == "user":
+        if row["resolution"] in protected_resolutions or row["memo_source"] == "user":
             stats["protected"] += 1
             continue
 
@@ -100,11 +108,15 @@ def apply_deterministic_repair(conn: sqlite3.Connection) -> dict[str, int]:
         )
         stats[reason] += 1
 
-    conn.execute(
-        "INSERT INTO app_settings (key, value) VALUES (?, '1') "
-        "ON CONFLICT(key) DO UPDATE SET value = '1'",
-        (REPAIR_FLAG,),
-    )
+    if rows:
+        # Only claim to be done when there was something to judge. Marking an
+        # empty database repaired means every user who opens the app before
+        # importing — i.e. everyone — permanently skips this pass.
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?, '1') "
+            "ON CONFLICT(key) DO UPDATE SET value = '1'",
+            (REPAIR_FLAG,),
+        )
     conn.commit()
     if stats["transfers"] or stats["rules"]:
         log.warning(

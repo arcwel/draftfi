@@ -19,19 +19,29 @@ export default function SyncButton() {
       {result && !syncing && (
         // A provider failure (rate limit, bad key, outage) must never look like
         // a silent success — say what actually happened.
+        // A crashed job sets `state: 'error'` and `error`, NOT `detail`. Reading
+        // only `detail` meant a sync that died mid-run fell through to the last
+        // branch and reported "Up to date" — the exact failure this element
+        // exists to prevent. Check the state first.
         <span
           className={`max-w-[22rem] truncate text-[11px] ${
-            result.detail ? 'text-amber-400' : 'text-gray-400'
+            result.state === 'error'
+              ? 'text-rose-400'
+              : result.detail
+                ? 'text-amber-400'
+                : 'text-gray-400'
           }`}
-          title={result.detail || undefined}
+          title={result.error || result.detail || undefined}
         >
-          {result.detail
-            ? `⚠ ${result.detail} · ${result.still_uncategorized} left uncategorized`
-            : result.recategorized > 0
-              ? `✓ Categorized ${result.recategorized}`
-              : result.still_uncategorized > 0
-                ? `${result.still_uncategorized} still uncategorized`
-                : 'Up to date'}
+          {result.state === 'error'
+            ? `✕ Sync failed: ${result.error || 'unknown error'}`
+            : result.detail
+              ? `⚠ ${result.detail} · ${result.still_uncategorized} left uncategorized`
+              : result.recategorized > 0
+                ? `✓ Categorized ${result.recategorized}`
+                : result.still_uncategorized > 0
+                  ? `${result.still_uncategorized} still uncategorized`
+                  : 'Up to date'}
         </span>
       )}
       <button

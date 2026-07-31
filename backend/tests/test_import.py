@@ -47,7 +47,7 @@ def client(tmp_path, monkeypatch):
 
     monkeypatch.setattr(llm, "health", offline)
 
-    with TestClient(main.create_app()) as c:
+    with TestClient(main.create_app(), base_url="http://127.0.0.1") as c:
         yield c
 
 

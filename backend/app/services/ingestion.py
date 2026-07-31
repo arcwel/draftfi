@@ -6,6 +6,7 @@ imports). A tiny in-process job registry backs the frontend progress UI.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 from dataclasses import asdict, dataclass, field, replace
@@ -13,7 +14,7 @@ from dataclasses import asdict, dataclass, field, replace
 from app.db import repository as repo
 from app.db.connection import session
 from app.services import categorization, llm, llm_config, signs
-from app.services.csv_parser import ParsedRow, header_signature
+from app.services.csv_parser import ParsedRow, header_signature, number_duplicates
 from app.services.statement_parsers import parse_statement, sniff_format
 
 CHUNK = 25
@@ -86,6 +87,7 @@ async def run_import(
     """Parse every file, then categorize the combined rows in chunks."""
     status.state = "parsing"
     pending: list[ParsedRow] = []
+    sources: list[tuple[str, list[ParsedRow]]] = []
     single = len(files) == 1
 
     for filename, content in files:
@@ -115,7 +117,17 @@ async def run_import(
 
         status.errors.extend(f"{filename}: {e}" for e in report.errors)
         status.skipped_invalid += len(report.errors)
-        pending.extend(report.rows)
+        # Numbered per file, before the rows are merged into the batch: two
+        # identical charges in the same statement are two transactions, and
+        # their import hashes have to differ or the second is silently dropped.
+        rows = number_duplicates(report.rows)
+        # One file is one export, and an export has exactly one sign convention.
+        # Remember which rows came from where so the two can be judged apart —
+        # account_name alone is not enough, because dropping a checking export
+        # and a card export together with the same account hint puts them both
+        # under one name.
+        sources.append((filename, rows))
+        pending.extend(rows)
 
         # Remember a manually-supplied mapping so this bank imports cleanly next
         # time (only for CSV, which has a header signature).
@@ -127,17 +139,35 @@ async def run_import(
     # spending as income, and it also breaks transfer detection (negative
     # payroll looks like a reversal). Fixing it here means every downstream
     # number — and every category decision — sees the right direction.
-    inverted, why = signs.detect_inverted(
-        [(r.raw_description, r.amount) for r in pending]
-    )
-    if inverted:
-        status.errors.append(
-            f"Amounts looked inverted ({why}); flipped them so income is positive."
+    #
+    # Decided per account, because one job can carry a correctly-signed checking
+    # export and an inverted card export at once. Judged together, the card's
+    # positive charges outvote checking's correct payroll and the good file gets
+    # flipped too.
+    flipped: dict[int, ParsedRow] = {}
+    for filename, rows in sources:
+        # Within a file, still split by account: some exports carry several.
+        plan = signs.plan_flips(
+            [(r.account_name, r.raw_description, r.amount) for r in rows]
         )
-        pending = [
-            replace(row, amount=-row.amount, import_hash=row.import_hash)
-            for row in pending
-        ]
+        for account, (inverted, why) in sorted(plan.items()):
+            if not inverted:
+                continue
+            status.errors.append(
+                f"{filename}: amounts looked inverted ({why}); flipped them so "
+                "income is positive."
+            )
+            for row in rows:
+                if (row.account_name or "") != account:
+                    continue
+                # NOTE: no ``import_hash=`` here. It is a @property on
+                # ParsedRow, not a field, so passing it to replace() raises
+                # TypeError and takes the whole import down. Leaving it out is
+                # also correct: the hash recomputes from the flipped amount,
+                # which is what keeps re-import dedupe stable.
+                flipped[id(row)] = replace(row, amount=-row.amount)
+    if flipped:
+        pending = [flipped.get(id(row), row) for row in pending]
 
     status.total = len(pending)
     status.state = "categorizing"
@@ -171,6 +201,9 @@ async def run_import(
                     "clean_merchant": result.clean_merchant,
                     "resolution": result.resolution,
                     "import_hash": row.import_hash,
+                    # Computed during categorization; dropping it here left the
+                    # merchant review queue empty after every import.
+                    "canonical_key": result.canonical_key or None,
                 },
             )
             status.processed += 1
@@ -186,6 +219,12 @@ async def run_import(
                 status.uncategorized += 1
         category_names = [c["name"] for c in repo.list_categories(conn)]
         conn.commit()
+        # Yield to the event loop. Everything in this loop is synchronous when
+        # no provider is configured — the default — so without this the entire
+        # API is frozen for the whole run: the progress endpoint the UI polls
+        # cannot be served, so it sits on "Syncing…" with no numbers and then
+        # times out. Measured at 25,000 rows: one event-loop tick in 6.3s.
+        await asyncio.sleep(0)
 
     conn.commit()
     status.state = "done"

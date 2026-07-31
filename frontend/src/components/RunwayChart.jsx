@@ -42,10 +42,20 @@ function RunwayChart({ series, compare }) {
         <h3 className="text-sm font-semibold text-white">
           Tactical Cash Runway
           <span className="ml-2 text-[11px] font-normal text-gray-500">
-            liquid cash · {series.runway.length - 1} months
+            {series.cash_position_set === false
+              ? `change in cash · ${series.runway.length - 1} months`
+              : `liquid cash · ${series.runway.length - 1} months`}
           </span>
         </h3>
-        {failure != null ? (
+        {/* Three states, not two. Without a starting balance the curve's shape
+            is real but its level is unknown, so neither a red failure nor a
+            green all-clear is an honest thing to show — both are claims about
+            a number nobody has entered. */}
+        {series.cash_position_set === false ? (
+          <span className="text-xs font-medium text-amber-400">
+            Set your Cash to see a real runway
+          </span>
+        ) : failure != null ? (
           <span className="text-xs font-medium text-rose-400">
             ⚠ Dips below floor at month {failure}
           </span>

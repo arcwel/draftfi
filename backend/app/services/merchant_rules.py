@@ -282,19 +282,36 @@ def is_ambiguous(key: str) -> bool:
     """True when this merchant's category is a judgement call, not a fact."""
     if key in AMBIGUOUS_MERCHANTS:
         return True
-    return any(key.startswith(m) for m in AMBIGUOUS_MERCHANTS)
+    return any(_prefix_match(key, m) for m in AMBIGUOUS_MERCHANTS)
 
 
 _RULE_KEYS = sorted(MERCHANT_CATEGORIES, key=len, reverse=True)
 
 
+def _prefix_match(key: str, candidate: str) -> bool:
+    """True when `candidate` is `key` or a whole leading token-run of it.
+
+    Plain str.startswith was matching mid-word. With 2-4 character rule keys in
+    the table that produced real collisions on real statements:
+
+        "ATTORNEY SMITH LAW"  -> "ATT"  -> AT&T          -> Utilities
+        "MAXWELL PLUMBING"    -> "MAX"  -> HBO Max       -> Entertainment
+        "RENTAL CAR CENTER"   -> "RENT" -> Rent          -> Housing
+
+    The AT&T case is worse than a wrong category: both descriptors collapsed
+    onto one canonical key, so a user override on the phone bill silently
+    re-categorized their solicitor as well.
+    """
+    return key == candidate or key.startswith(candidate + " ")
+
+
 def lookup(key: str) -> Match | None:
-    """Exact match, then longest prefix. Returns None when nothing is known."""
+    """Exact match, then longest whole-token prefix. None when nothing is known."""
     category = MERCHANT_CATEGORIES.get(key)
     if category:
         return Match(category, "rule")
     for rule_key in _RULE_KEYS:
-        if key.startswith(rule_key):
+        if _prefix_match(key, rule_key):
             return Match(MERCHANT_CATEGORIES[rule_key], "rule")
     return None
 

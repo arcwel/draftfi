@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import time
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -38,18 +39,71 @@ def _invalidate_health_cache() -> None:
     _health_cache.clear()
 
 
+def _endpoint(url: str) -> tuple[str, str]:
+    """(scheme, host:port) — what actually decides where bytes are sent."""
+    parsed = urlparse(url)
+    return parsed.scheme.lower(), parsed.netloc.lower()
+
+
+def _validate_base_url(url: str) -> None:
+    """Reject anything that isn't a plausible provider endpoint.
+
+    base_url arrives as a free-text field and ends up as the host we POST the
+    user's API key to. Plain http is allowed only to loopback, because that is
+    Ollama and LM Studio; everything else has to be https.
+    """
+    scheme, netloc = _endpoint(url)
+    if scheme not in ("http", "https") or not netloc:
+        raise HTTPException(
+            status_code=400, detail="Base URL must be an http(s) address."
+        )
+    host = netloc.split(":")[0]
+    if scheme == "http" and host not in ("127.0.0.1", "localhost", "::1", "[::1]"):
+        raise HTTPException(
+            status_code=400,
+            detail="Only https endpoints are allowed (http is permitted for "
+            "localhost, for Ollama and LM Studio).",
+        )
+
+
 def _transient_config(conn: sqlite3.Connection, body: LLMConfigIn) -> LLMConfig:
-    """Build an unsaved config from form values, reusing the stored key when the
-    user hasn't re-typed one (so Test/model-fetch work against a saved secret)."""
+    """Build an unsaved config from form values.
+
+    The stored key is reused ONLY when the request points at the same endpoint
+    it was saved for. It used to be attached to whatever base_url the caller
+    supplied, so a request naming any host — no key in the body at all — made
+    the app read the secret out of the OS keychain and send it there. The
+    keychain integration exists precisely so that key is not readable from
+    disk; handing it out over an unauthenticated loopback call defeated it.
+    """
     if body.provider not in PROVIDERS:
         raise HTTPException(status_code=400, detail="Unknown provider.")
     spec = PROVIDERS[body.provider]
+    base_url = (body.base_url or "").strip() or spec.default_base_url
+    _validate_base_url(base_url)
+
     typed = (body.api_key or "").strip()
+    api_key = typed
+    if not api_key:
+        saved = llm_config.resolve_config(conn)
+        known = {_endpoint(spec.default_base_url)}
+        if saved.provider == body.provider and saved.base_url:
+            known.add(_endpoint(saved.base_url))
+        if _endpoint(base_url) in known:
+            api_key = llm_config.get_key(conn, body.provider) or ""
+        else:
+            log.warning(
+                "Not sending the stored %s key to an unrecognised endpoint (%s); "
+                "the user must re-enter it to test a custom host.",
+                body.provider,
+                base_url,
+            )
+
     return LLMConfig(
         provider=body.provider,
         model=(body.model or "").strip() or spec.default_model,
-        base_url=(body.base_url or "").strip() or spec.default_base_url,
-        api_key=typed or llm_config.get_key(conn, body.provider),
+        base_url=base_url,
+        api_key=api_key or None,
     )
 
 
@@ -217,6 +271,11 @@ def put_config(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> LLMConfigOut:
     """Set active provider/model/base URL and optionally store an API key."""
+    # Same check as the transient path. A persisted base_url is worse than a
+    # one-off: it redirects every future categorization call — key and merchant
+    # text — for good.
+    if (body.base_url or "").strip():
+        _validate_base_url(body.base_url.strip())
     try:
         llm_config.save_config(
             conn,

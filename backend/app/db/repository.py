@@ -228,10 +228,16 @@ def insert_transaction(conn: sqlite3.Connection, tx: dict[str, Any]) -> int | No
         cur = conn.execute(
             "INSERT INTO transactions "
             "(date, raw_description, amount, account_name, category_id, "
-            " clean_merchant, resolution, import_hash) "
+            " clean_merchant, resolution, import_hash, canonical_key) "
             "VALUES (:date, :raw_description, :amount, :account_name, :category_id, "
-            ":clean_merchant, :resolution, :import_hash)",
-            tx,
+            ":clean_merchant, :resolution, :import_hash, :canonical_key)",
+            # canonical_key was computed during categorization and then thrown
+            # away here, so every freshly imported row landed with it NULL. The
+            # merchant review queue requires it, which meant the user could
+            # import a statement, be told 6 rows were uncategorized, open
+            # "Review merchants" and be told there was nothing to review —
+            # until an app restart backfilled the column.
+            {"canonical_key": None, **tx},
         )
         return int(cur.lastrowid)
     except sqlite3.IntegrityError:
@@ -431,6 +437,15 @@ def merge_category(
         "UPDATE merchant_llm_cache SET category_id = ? WHERE category_id = ?",
         (target_id, source_id),
     )
+    # The merchant memo was missed here. Its FK is ON DELETE SET NULL, so a
+    # merge left the user's own decisions pointing at NULL with source='user' —
+    # invisible to the review queue (which excludes user rows) and fatal to the
+    # next import, where categorization did int(memo["category_id"]) and hit a
+    # TypeError that failed the whole job.
+    conn.execute(
+        "UPDATE merchant_category SET category_id = ? WHERE category_id = ?",
+        (target_id, source_id),
+    )
     conn.execute("DELETE FROM categories WHERE id = ?", (source_id,))
     return cur.rowcount
 
@@ -445,6 +460,10 @@ def delete_category(
     )
     conn.execute(
         "UPDATE merchant_llm_cache SET category_id = ? WHERE category_id = ?",
+        (fallback_id, category_id),
+    )
+    conn.execute(
+        "UPDATE merchant_category SET category_id = ? WHERE category_id = ?",
         (fallback_id, category_id),
     )
     conn.execute("DELETE FROM categories WHERE id = ?", (category_id,))
@@ -543,27 +562,103 @@ def set_category_budget(
         )
 
 
+# --------------------------------------------------------------------------- #
+# One definition of "the spendable history"
+# --------------------------------------------------------------------------- #
+# Every aggregate in the app has to count the same rows, or the screens disagree
+# with each other. They used to, in three different ways:
+#
+#   * the runway forecast counted transfers and the budget page did not, so the
+#     forecast understated the real burn rate roughly threefold;
+#   * category_breakdown INNER JOINed categories while monthly_series LEFT
+#     JOINed, so money with no category was visible in the trends chart and
+#     invisible in the budget page that was meant to explain it;
+#   * months_observed counted months that every numerator excluded, so per
+#     category averages were divided by too large a number.
+#
+# The population, once, here:
+#   * split PARENTS are excluded — their children carry the amounts
+#   * split children are kept (they have is_split_parent = 0)
+#   * transfers are excluded — a card payment settles spending already counted
+#   * rows with no category are KEPT, and reported as "Uncategorized"
+_SPENDABLE = (
+    "FROM transactions t LEFT JOIN categories c ON c.id = t.category_id "
+    "WHERE t.is_split_parent = 0 AND COALESCE(c.is_transfer, 0) = 0 "
+    "AND t.date IS NOT NULL "
+)
+
+# Gross flows in each direction. Reporting only the net per category loses the
+# direction: a month with more refunds than purchases nets positive, and the old
+# code then reclassified the whole category as income.
+_FLOW_COLUMNS = (
+    "COALESCE(SUM(t.amount), 0) AS total, "
+    "COALESCE(SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END), 0) AS inflow, "
+    "COALESCE(SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END), 0) AS outflow, "
+    "COUNT(t.id) AS n "
+)
+
+
 def observed_months(conn: sqlite3.Connection) -> list[str]:
-    """Sorted distinct YYYY-MM months present in the transaction history."""
+    """Sorted distinct YYYY-MM months in the spendable history."""
     rows = conn.execute(
-        "SELECT DISTINCT substr(date, 1, 7) AS ym FROM transactions "
-        "WHERE is_split_parent = 0 AND date IS NOT NULL ORDER BY ym"
+        "SELECT DISTINCT substr(t.date, 1, 7) AS ym " + _SPENDABLE + "ORDER BY ym"
     ).fetchall()
     return [r["ym"] for r in rows if r["ym"]]
 
 
+def rate_months(conn: sqlite3.Connection) -> list[str]:
+    """The months a monthly *rate* should be averaged over.
+
+    Drops a trailing partial month. The divisor is a count of distinct months,
+    so a single transaction dated in a new month adds a whole month to the
+    denominator while contributing almost none of the flow — which understated
+    the burn rate by 29% on a four-month history in testing, always in the
+    optimistic direction. A month is treated as complete once activity reaches
+    the 28th, which every calendar month has.
+    """
+    months = observed_months(conn)
+    if len(months) < 3:
+        # Too little history for dropping a month to be an improvement.
+        return months
+    last = months[-1]
+    row = conn.execute(
+        "SELECT MAX(t.date) AS latest " + _SPENDABLE + "AND substr(t.date, 1, 7) = ?",
+        (last,),
+    ).fetchone()
+    latest = (row["latest"] or "") if row else ""
+    try:
+        complete = int(latest[8:10]) >= 28
+    except (ValueError, IndexError):
+        complete = True
+    return months if complete else months[:-1]
+
+
+def run_rate(conn: sqlite3.Connection) -> tuple[float, float, int]:
+    """(monthly inflow, monthly outflow, months counted) over the same rows
+    every other aggregate uses. The single source of truth for "per month"."""
+    months = rate_months(conn)
+    if not months:
+        return 0.0, 0.0, 1
+    placeholders = ",".join("?" for _ in months)
+    row = conn.execute(
+        "SELECT "
+        "COALESCE(SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END), 0) AS inflow, "
+        "COALESCE(SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END), 0) AS outflow "
+        + _SPENDABLE
+        + f"AND substr(t.date, 1, 7) IN ({placeholders})",
+        months,
+    ).fetchone()
+    n = max(1, len(months))
+    return float(row["inflow"]) / n, float(row["outflow"]) / n, n
+
+
 def monthly_series(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    """Per-month, per-category signed totals (split parents excluded)."""
+    """Per-month, per-category flows over the spendable history."""
     return _rows(
         conn.execute(
             "SELECT substr(t.date, 1, 7) AS ym, c.id AS category_id, "
-            "c.name AS category_name, c.color AS category_color, "
-            "SUM(t.amount) AS total, COUNT(t.id) AS n "
-            "FROM transactions t LEFT JOIN categories c ON t.category_id = c.id "
-            "WHERE t.is_split_parent = 0 AND t.date IS NOT NULL "
-            # Transfers move money between the user's own accounts; counting
-            # them would double-count the spending they settle.
-            "AND COALESCE(c.is_transfer, 0) = 0 "
+            "COALESCE(c.name, 'Uncategorized') AS category_name, "
+            "c.color AS category_color, " + _FLOW_COLUMNS + _SPENDABLE +
             "GROUP BY ym, t.category_id ORDER BY ym"
         ).fetchall()
     )
@@ -572,29 +667,28 @@ def monthly_series(conn: sqlite3.Connection) -> list[dict[str, Any]]:
 def category_breakdown_for_month(
     conn: sqlite3.Connection, month: str
 ) -> list[dict[str, Any]]:
-    """Per-category totals for a single YYYY-MM month, with budget settings."""
+    """Per-category flows for a single YYYY-MM month, with budget settings."""
     return _rows(
         conn.execute(
-            "SELECT c.id AS category_id, c.name AS category_name, "
+            "SELECT c.id AS category_id, "
+            "COALESCE(c.name, 'Uncategorized') AS category_name, "
             "c.color AS category_color, c.monthly_budget AS monthly_budget, "
-            "c.budget_rollover AS budget_rollover, "
-            "COALESCE(SUM(t.amount), 0) AS total, COUNT(t.id) AS n "
-            "FROM categories c "
-            "JOIN transactions t ON t.category_id = c.id "
-            "WHERE t.is_split_parent = 0 AND substr(t.date, 1, 7) = ? "
-            "AND COALESCE(c.is_transfer, 0) = 0 "
-            "GROUP BY c.id ORDER BY SUM(t.amount) ASC",
+            "c.budget_rollover AS budget_rollover, " + _FLOW_COLUMNS + _SPENDABLE +
+            "AND substr(t.date, 1, 7) = ? "
+            "GROUP BY t.category_id ORDER BY SUM(t.amount) ASC",
             (month,),
         ).fetchall()
     )
 
 
 def months_observed(conn: sqlite3.Connection) -> int:
-    """Distinct calendar months present in the transaction history (min 1)."""
-    row = conn.execute(
-        "SELECT COUNT(DISTINCT substr(date, 1, 7)) AS n FROM transactions"
-    ).fetchone()
-    return max(1, int(row["n"] or 0))
+    """Months used as the divisor for monthly averages (min 1).
+
+    Same months as :func:`run_rate`, so the budget page's per-category averages,
+    its headline totals, and the forecast's run-rate are all divided by the same
+    number.
+    """
+    return max(1, len(rate_months(conn)))
 
 
 def category_breakdown(conn: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -603,18 +697,23 @@ def category_breakdown(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     Includes every category that has transactions; the caller derives monthly
     averages using ``months_observed``.
     """
+    # Restricted to the same months as months_observed(), which is the divisor
+    # the caller uses. Averaging a numerator over months the denominator does
+    # not count — the bug this replaces — inflates every per-category figure.
+    months = rate_months(conn)
+    if not months:
+        return []
+    placeholders = ",".join("?" for _ in months)
     return _rows(
         conn.execute(
-            "SELECT c.id AS category_id, c.name AS category_name, "
+            "SELECT c.id AS category_id, "
+            "COALESCE(c.name, 'Uncategorized') AS category_name, "
             "c.color AS category_color, c.monthly_budget AS monthly_budget, "
-            "c.budget_rollover AS budget_rollover, "
-            "COALESCE(SUM(t.amount), 0) AS total, COUNT(t.id) AS n "
-            "FROM categories c "
-            "JOIN transactions t ON t.category_id = c.id "
-            "WHERE t.is_split_parent = 0 "
-            "AND COALESCE(c.is_transfer, 0) = 0 "
-            "GROUP BY c.id "
-            "ORDER BY SUM(t.amount) ASC"
+            "c.budget_rollover AS budget_rollover, " + _FLOW_COLUMNS + _SPENDABLE +
+            f"AND substr(t.date, 1, 7) IN ({placeholders}) "
+            "GROUP BY t.category_id "
+            "ORDER BY SUM(t.amount) ASC",
+            months,
         ).fetchall()
     )
 
@@ -760,7 +859,17 @@ def reset_financial_data(conn: sqlite3.Connection, base_parameters: dict) -> Non
     """
     conn.execute("DELETE FROM transactions")
     conn.execute("DELETE FROM merchant_llm_cache")
+    # And the canonical-merchant memo. Without this, a user who wiped their data
+    # to escape bad categorizations got the identical ones applied to the very
+    # next import — the one thing "start over" is supposed to prevent.
+    conn.execute("DELETE FROM merchant_category")
     conn.execute("DELETE FROM branches WHERE is_base = 0")
+    # The sign repair is scoped to the data that existed when it ran; a fresh
+    # import deserves a fresh judgement.
+    conn.execute(
+        "DELETE FROM app_settings WHERE key IN ('signs_repair_v1', "
+        "'deterministic_repair_v1')"
+    )
     conn.execute("UPDATE categories SET monthly_budget = NULL")
     conn.execute(
         "UPDATE branches SET parameters = ?, milestones = '[]' WHERE is_base = 1",

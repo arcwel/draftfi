@@ -17,6 +17,7 @@ the affected chunk is replayed against the replacement.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import sqlite3
 from dataclasses import asdict, dataclass
@@ -165,6 +166,12 @@ async def _run(conn: sqlite3.Connection, job: SyncJob) -> None:
         category_names = [c["name"] for c in repo.list_categories(conn)]
         # Commit per chunk so progress is durable and status reads see it.
         conn.commit()
+        # Yield to the event loop. Everything in this loop is synchronous when
+        # no provider is configured — the default — so without this the entire
+        # API is frozen for the whole run: the progress endpoint the UI polls
+        # cannot be served, so it sits on "Syncing…" with no numbers and then
+        # times out. Measured at 25,000 rows: one event-loop tick in 6.3s.
+        await asyncio.sleep(0)
         start += CHUNK
 
         if report.get("provider_error"):

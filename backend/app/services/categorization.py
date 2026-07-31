@@ -69,7 +69,10 @@ def _deterministic(
 ) -> tuple[int, str] | None:
     """Tiers 1-4: user override, transfer/flow, seeded rule, existing memo."""
     memo = repo.get_merchant_decision(conn, key)
-    if memo and memo["source"] == "user":
+    # The category_id check is not redundant: the FK is ON DELETE SET NULL, so a
+    # deleted category leaves a user decision pointing at nothing. int(None)
+    # raised a TypeError that escaped all the way out of the import job.
+    if memo and memo["source"] == "user" and memo["category_id"] is not None:
         return int(memo["category_id"]), "override"
 
     match = merchant_rules.resolve(key, amount)

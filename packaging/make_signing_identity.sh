@@ -12,12 +12,27 @@
 # the signature so the keychain stops re-asking.
 #
 # Run once:  bash packaging/make_signing_identity.sh
+# No administrator password is required — everything happens in the current
+# user's keychain and trust domain.
 set -euo pipefail
 
 NAME="${DRAFTFI_SIGN_IDENTITY:-DraftFi Local Signing}"
 
-if security find-identity -v -p codesigning | grep -q "$NAME"; then
-  echo "Identity '$NAME' already exists — nothing to do."
+# `find-identity -v` lists an untrusted certificate too, tagging it
+# CSSMERR_TP_NOT_TRUSTED. Matching on the name alone therefore reported "nothing
+# to do" for exactly the broken state this script exists to fix. Check the tag.
+EXISTING="$(security find-identity -v -p codesigning | grep "$NAME" || true)"
+if [ -n "$EXISTING" ]; then
+  if printf '%s' "$EXISTING" | grep -q "CSSMERR"; then
+    echo "Identity '$NAME' exists but is not trusted — repairing trust only."
+    CERT="$(mktemp)"
+    security find-certificate -c "$NAME" -p > "$CERT"
+    security add-trusted-cert -r trustRoot -p codeSign "$CERT"
+    rm -f "$CERT"
+    security find-identity -v -p codesigning | grep "$NAME"
+    exit 0
+  fi
+  echo "Identity '$NAME' already exists and is trusted — nothing to do."
   exit 0
 fi
 
@@ -63,14 +78,23 @@ security import "$WORK/identity.p12" -k "$KEYCHAIN" -P "$P12PASS" \
   -T /usr/bin/codesign -T /usr/bin/security >/dev/null
 
 # codesign refuses an untrusted identity (CSSMERR_TP_NOT_TRUSTED), so this step
-# is REQUIRED, not optional — and it is the one part that cannot be automated.
-# macOS will ask for your administrator password. Nothing else in this script
-# needs it.
+# is REQUIRED, not optional.
+#
+# It goes in the USER trust domain, not the admin one. The difference matters:
+#
+#   security add-trusted-cert -d ... -k /Library/Keychains/System.keychain
+#
+# writes to the admin domain, needs sudo, and asks for an administrator
+# password. Dropping -d writes the same trust setting to the current user's
+# trust domain instead — and that is all codesign consults when deciding
+# whether to accept an identity for signing. No sudo, no password, no dialog.
+#
+# The narrower domain is also the correct one on the merits: this certificate
+# only ever signs this user's local builds, so trusting it machine-wide would
+# grant more than the job needs.
 echo
-echo "Trusting the certificate for code signing — macOS will ask for your"
-echo "administrator password. This is the only interactive step."
-sudo security add-trusted-cert -d -r trustAsRoot \
-  -p codeSign -k /Library/Keychains/System.keychain "$WORK/cert.pem" || {
+echo "Trusting the certificate for code signing (current user only)…"
+security add-trusted-cert -r trustRoot -p codeSign "$WORK/cert.pem" || {
   echo
   echo "Trust step did not complete. The identity exists but codesign will"
   echo "refuse it, so builds stay ad-hoc signed and macOS will keep asking for"

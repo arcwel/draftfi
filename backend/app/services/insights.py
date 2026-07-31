@@ -21,12 +21,25 @@ TRAILING_MONTHS = 3
 
 
 def _month_label(ym: str) -> str:
-    year, month = ym.split("-")
+    """Human month name, or the raw value if it isn't a YYYY-MM.
+
+    Defensive on purpose. Dates are validated on the way in now, but a database
+    restored from an older build, or an OFX file with a nonsense DTPOSTED, can
+    still produce something unparseable — and a cosmetic label is never worth
+    500ing the whole insights endpoint over.
+    """
     names = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun",
         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ]
-    return f"{names[int(month) - 1]} {year}"
+    try:
+        year, month = ym.split("-")[:2]
+        index = int(month) - 1
+        if not 0 <= index < 12:
+            return ym
+        return f"{names[index]} {year}"
+    except (ValueError, AttributeError, IndexError):
+        return ym
 
 
 def compute_insights(conn: sqlite3.Connection) -> list[dict]:

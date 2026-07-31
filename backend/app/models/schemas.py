@@ -67,8 +67,15 @@ class CategoryOverride(BaseModel):
     category_id: int
 
 
+# YYYY-MM-DD. Enforced here because every month-based aggregate does
+# substr(date, 1, 7) and then int()s the result: one row reading "July 2026"
+# made /insights raise ValueError on every single call, permanently, and the
+# frontend's Promise.all took the Subscriptions panel down with it.
+_ISO_DATE = r"^\d{4}-\d{2}-\d{2}$"
+
+
 class TransactionCreate(BaseModel):
-    date: str
+    date: str = Field(pattern=_ISO_DATE)
     amount: float
     raw_description: str = Field(min_length=1)
     account_name: str = "Manual Entry"
@@ -79,7 +86,7 @@ class TransactionCreate(BaseModel):
 
 
 class TransactionUpdate(BaseModel):
-    date: str | None = None
+    date: str | None = Field(default=None, pattern=_ISO_DATE)
     amount: float | None = None
     raw_description: str | None = None
     account_name: str | None = None
@@ -209,7 +216,13 @@ class ChangeEvent(BaseModel):
 
 
 class SimulationParameters(BaseModel):
-    starting_cash: float = 0.0
+    # None means "the user hasn't told us", which is not the same as "$0" — and
+    # the difference is the whole forecast. With a hard 0.0 default the app
+    # could not tell an empty plan from a broke one, so it drew a runway from an
+    # unknown origin and flagged "dips below floor at month 1" for anyone whose
+    # spending merely exceeded their income by a dollar. Bank statements carry
+    # flows, not balances, so this cannot be derived: it has to be asked for.
+    starting_cash: float | None = None
     monthly_inflow: float | None = None
     monthly_outflow: float | None = None
     income_adjustment_pct: float = Field(0.0, ge=-30, le=30)
@@ -249,6 +262,12 @@ class SimulationSeries(BaseModel):
     macro: list[MacroPoint]
     failure_month: int | None = None
     safety_floor: float
+    # False when starting_cash was never set. The curve is still drawn — its
+    # shape is real, it is the *level* that is unknown — but the UI shows a
+    # "tell me your cash position" prompt instead of a red failure warning,
+    # because "you run out of money in month 1" computed from an assumed zero
+    # balance is a statement about the missing input, not about the user.
+    cash_position_set: bool = True
 
 
 class BranchBase(BaseModel):

@@ -50,6 +50,12 @@ class ParsedRow:
     raw_description: str
     amount: float
     account_name: str
+    # Which repeat of an identical row this is, within one file. Two coffees at
+    # the same shop on the same day for the same amount are two transactions,
+    # not a duplicate — but they hash identically, and a UNIQUE index on
+    # import_hash silently dropped the second one while reporting it as
+    # "1 duplicate skipped". See number_duplicates().
+    occurrence: int = 0
 
     @property
     def import_hash(self) -> str:
@@ -57,7 +63,28 @@ class ParsedRow:
             f"{self.date}|{self.raw_description}|"
             f"{self.amount:.2f}|{self.account_name}"
         )
+        # The first occurrence deliberately hashes exactly as it always did, so
+        # re-importing a statement still matches rows already in the database.
+        # Only the repeats get a new key.
+        if self.occurrence:
+            key = f"{key}|{self.occurrence}"
         return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def number_duplicates(rows: list[ParsedRow]) -> list[ParsedRow]:
+    """Tag identical rows within one file with their occurrence index.
+
+    Deterministic per file, so re-importing the same statement produces the same
+    hashes and still dedupes correctly.
+    """
+    seen: dict[tuple[str, str, str, str], int] = {}
+    for row in rows:
+        key = (
+            row.date, row.raw_description, f"{row.amount:.2f}", row.account_name
+        )
+        row.occurrence = seen.get(key, 0)
+        seen[key] = row.occurrence + 1
+    return rows
 
 
 @dataclass
@@ -205,10 +232,22 @@ def parse_csv(
         if amount is None and (debit_col or credit_col):
             debit = _normalize_amount(row.get(debit_col, "")) if debit_col else None
             credit = _normalize_amount(row.get(credit_col, "")) if credit_col else None
-            if debit is not None:
+            # Truthiness, not `is not None`. Plenty of banks fill BOTH columns
+            # and write 0.00 in the unused one; `_normalize_amount("0.00")`
+            # returns 0.0, so an `is not None` test always picked the debit and
+            # every deposit in the file was stored as -$0.00, with no error.
+            if debit and credit:
+                report.errors.append(
+                    f"Row {line_no}: both debit and credit are non-zero; skipped."
+                )
+                continue
+            if debit:
                 amount = -abs(debit)
-            elif credit is not None:
+            elif credit:
                 amount = abs(credit)
+            elif debit is not None or credit is not None:
+                # Both present and both zero — a real, if unusual, $0 row.
+                amount = 0.0
         if amount is None:
             report.errors.append(f"Row {line_no}: unparseable amount; skipped.")
             continue

@@ -161,10 +161,20 @@ def _codesign(app_path: Path) -> None:
             f"[warn] signing identity {identity!r} is not trusted "
             f"({line.strip().split('(')[-1].rstrip(')')}), so codesign cannot "
             "use it. Keeping the ad-hoc signature.\n"
-            "       Finish the one-time trust step (needs your admin password):\n"
+            "       Finish the one-time trust step (no password needed):\n"
             "         bash packaging/make_signing_identity.sh"
         )
         return
+    # The build tree lives in a Google Drive folder, and both Drive and `ditto`
+    # attach extended attributes (com.apple.FinderInfo, quarantine flags) to the
+    # files inside the bundle. codesign will happily sign over them, but the
+    # signature then fails strict verification with "resource fork, Finder
+    # information, or similar detritus not allowed" — which macOS treats as an
+    # invalid signature, undoing the whole point of signing. Clear them first.
+    subprocess.run(
+        ["xattr", "-cr", str(app_path)],
+        capture_output=True, text=True, check=False, timeout=120,
+    )
     try:
         result = subprocess.run(
             [
@@ -184,6 +194,21 @@ def _codesign(app_path: Path) -> None:
         return
     if result.returncode != 0:
         print(f"[warn] codesign failed, keeping ad-hoc signature:\n{result.stderr}")
+        return
+    # Signing "succeeding" is not the same as the signature being valid, and a
+    # silently invalid one looks identical to ad-hoc from the keychain's point of
+    # view. Say which of the two actually happened.
+    check = subprocess.run(
+        ["codesign", "--verify", "--deep", "--strict", str(app_path)],
+        capture_output=True, text=True, check=False, timeout=120,
+    )
+    if check.returncode != 0:
+        print(
+            "[warn] signed, but the signature does not verify:\n"
+            f"{check.stderr.strip()}\n"
+            "       macOS will treat this build as unsigned and keep asking for "
+            "keychain access."
+        )
         return
     print(f"[OK] Signed with {identity!r} — keychain access will persist.")
 
