@@ -28,16 +28,24 @@ merge it into `main` unless you actually want it there.
 - `bootstrap.sh` — replays all of it onto the machine it runs on. Safe to
   re-run; it never overwrites anything that already exists.
 
-## Set up your machine (Mac/Linux)
+## Set up your machine
+
+**Mac / Linux** — paste into Terminal:
 
 ```
-git clone -b claude/fullstack-agent-setup-uheiau https://github.com/arcwel/draftfi /tmp/agent-carrier
-bash /tmp/agent-carrier/agent-setup/bootstrap.sh
+git clone -b claude/fullstack-agent-setup-uheiau https://github.com/arcwel/draftfi /tmp/agent-carrier && bash /tmp/agent-carrier/agent-setup/bootstrap.sh && cd ~/my-agent && claude "You are Jarvis and your bootstrap just ran. Finish the hardware half of my setup: Obsidian + vault registration for ~/HQ (ai-memory-vault.md Part 1), backtalk's install.sh, the voice-engine audition, the Desktop shortcuts (fullstack-agent.md Phase 6), then the first hello with ./fullstack-agent/start.sh."
 ```
 
-Then follow the four "what's left" steps the script prints (Obsidian, the
-voice models, the first hello, the Desktop shortcuts) — each is one sentence
-said to Claude Code in `~/my-agent`.
+**Windows** — paste into PowerShell:
+
+```
+git clone -b claude/fullstack-agent-setup-uheiau https://github.com/arcwel/draftfi $env:TEMP\agent-carrier; & $env:TEMP\agent-carrier\agent-setup\bootstrap.ps1; cd $HOME\my-agent; claude "You are Jarvis and your bootstrap just ran. Finish the hardware half of my setup: Obsidian + vault registration for ~/HQ (ai-memory-vault.md Part 1), the backtalk Windows install (backtalk.md Phase 1 step 3), the voice-engine audition, the Desktop shortcuts (fullstack-agent.md Phase 6), then the first hello with fullstack-agent\start.bat."
+```
+
+Either way: the bootstrap replays the finished setup (never overwriting
+anything that exists), then Claude Code opens **as Jarvis** in its home
+folder and does the remaining hardware steps itself — Obsidian, the voice
+models, the shortcuts, the first hello. You just answer its questions.
 
 ## What was verified in the cloud session
 
