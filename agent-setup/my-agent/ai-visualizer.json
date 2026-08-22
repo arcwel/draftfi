@@ -1,0 +1,8 @@
+{
+  "name": "JARVIS",
+  "badge": "",
+  "face": "board",
+  "port": 8790,
+  "bus_dir": "~/my-agent/backtalk",
+  "thinking_sound": true
+}

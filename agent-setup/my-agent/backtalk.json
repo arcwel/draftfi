@@ -1,0 +1,12 @@
+{
+  "agent_dir": "~/my-agent",
+  "name": "Jarvis",
+  "greeting": "Hello Tony, what are we working on today?",
+  "mic_mode": "ptt",
+  "ptt_key": "home",
+  "permission_mode": "ask",
+  "voice": "bm_lewis",
+  "stt_model": "small.en",
+  "extra_dirs": ["~/HQ"],
+  "barehands_state_dir": "~/my-agent/barehands/state"
+}

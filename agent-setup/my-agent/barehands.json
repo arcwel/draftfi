@@ -1,0 +1,16 @@
+{
+  "name": "JARVIS",
+  "port": 8794,
+  "orbs": [
+    {
+      "title": "HQ",
+      "path": "~/HQ",
+      "kind": "notes"
+    },
+    {
+      "title": "Props",
+      "path": "media",
+      "kind": "media"
+    }
+  ]
+}
