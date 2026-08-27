@@ -45,10 +45,10 @@ Derived from `AGWeb/PRD.md`. Phases are ordered by dependency; tasks within a ph
 - [x] 2B.4 Drag-and-drop rearrangement: drag tabs (blocks) or grips (whole stacks); drop on a header to stack, on a group to insert before it, on zone space to append/split; drop targets highlight — floating drops arrive with 2B.7/2B.10
 - [x] 2B.5 Rail: collapse blocks to an icon strip on the right edge (stage/columns shift to make room); one click restores to the block's previous zone
 - [x] 2B.6 Layout presets (Browsing / Building / Debugging) via the toolbar Layout menu + per-project layout persistence (localStorage keyed by workspace path, debounced saves, restored on project switch)
-- [ ] 2B.7 Floating glass block rendering over the page — requires per-block child windows since the native browser view paints above renderer DOM; build together with 2B.10's multi-window state sync
+- [x] 2B.7 Floating blocks: a group's float button pops the stack into its own frameless child window over the page (native browser views paint above renderer DOM, so floats are real OS windows); header drags the window, Dock returns the group to the browser window
 - [x] 2B.8 Tabbed stacks: groups are tabbed stacks; `+` opens a new instance into the group; drag a tab onto a header to stack, drag it out to split; closing the last tab removes the group
 - [x] 2B.9 Multiple instances per block type (Terminal 1/2, Editor 2…); instance lifecycle + naming
-- [ ] 2B.10 Detached mode: pop the whole deck out as a standalone IDE window (second BrowserWindow sharing the main-process store); browser reverts to pure browsing; "Dock back" re-merges with layout restored
+- [x] 2B.10 Detached mode: the toolbar pop-out sends the whole deck into a standalone frameless IDE window (blocks laid out IDE-style); the browser reverts to pure browsing with a "Deck detached" indicator (⌘D focuses the deck window); "Dock back" or closing the window re-merges into the Stage layout. Deck layout is mirrored across all shell windows via a main-process broadcast bus (stale-boot-state guard included)
 
 ## Phase 3 — IDE Core (Editor, Files, Terminal)
 

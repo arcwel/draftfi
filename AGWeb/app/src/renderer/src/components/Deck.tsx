@@ -116,7 +116,7 @@ function ZoneView({
   )
 }
 
-function GroupView({
+export function GroupView({
   group,
   grow,
   fixedWidth
@@ -126,7 +126,7 @@ function GroupView({
   fixedWidth?: number
 }): React.JSX.Element {
   const blocks = useShellStore((s) => s.blocks)
-  const { activateBlock, addBlockToGroup, closeBlock, sendToRail } = useShellStore()
+  const { activateBlock, addBlockToGroup, closeBlock, sendToRail, moveGroup } = useShellStore()
   const members = group.blockIds.map((id) => blocks[id]).filter(Boolean) as BlockInstance[]
   const active = blocks[group.activeBlockId] ?? members[0]
 
@@ -187,12 +187,16 @@ function GroupView({
           </button>
         )}
         <div className="ml-auto flex items-center gap-1.5 text-slate-400 dark:text-slate-600">
-          <button
-            className="rounded p-1 hover:bg-slate-100 dark:hover:bg-slate-800"
-            title="Float (arrives with detached mode)"
-          >
-            <PopOutIcon />
-          </button>
+          {active && (
+            <button
+              onClick={() => moveGroup(group.id, { kind: 'zone', zone: 'floating' })}
+              className="rounded p-1 hover:bg-slate-100 dark:hover:bg-slate-800"
+              aria-label={`Float ${active.title}`}
+              title="Float this stack in its own window"
+            >
+              <PopOutIcon />
+            </button>
+          )}
           {active && (
             <>
               <button

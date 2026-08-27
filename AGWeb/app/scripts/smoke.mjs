@@ -57,6 +57,32 @@ try {
   await window.click('button[aria-label="Restore Logs"]')
   await window.waitForSelector('button:has-text("Logs")')
 
+  // Float: pop the Files stack out as its own window, then dock it back.
+  const floatPromise = app.waitForEvent('window')
+  await window.click('button[aria-label="Float Files"]')
+  const floatWin = await floatPromise
+  await floatWin.waitForSelector('text=Files', { timeout: 15000 })
+  await floatWin.click('button[aria-label="Dock back"]')
+  await window
+    .locator('[data-deck-header]')
+    .filter({ has: window.locator('button', { hasText: 'Files' }) })
+    .first()
+    .waitFor({ timeout: 5000 })
+
+  // Detach: the whole deck becomes a standalone IDE window; the browser
+  // reverts to pure browsing with a "Deck detached" indicator.
+  const deckPromise = app.waitForEvent('window')
+  await window.click('button[aria-label="Detach deck"]')
+  const deckWin = await deckPromise
+  await deckWin.waitForSelector('text=Dock back', { timeout: 15000 })
+  await deckWin.waitForSelector('text=Terminal 1')
+  await window.waitForSelector('text=Deck detached')
+  await deckWin.screenshot({ path: screenshotPath.replace(/\.png$/, '-deckwin.png') })
+
+  // Dock back merges everything into the browser window's Stage layout.
+  await deckWin.click('text=Dock back')
+  await window.waitForSelector('.workspace.revealed', { timeout: 5000 })
+
   // Hide the deck again — back to pure browsing.
   await window.keyboard.press('ControlOrMeta+d')
   await window.waitForSelector('.workspace:not(.revealed)', { timeout: 5000 })

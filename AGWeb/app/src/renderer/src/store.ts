@@ -1,5 +1,18 @@
 import { create } from 'zustand'
 import type { BrowserTabState, WorkspaceInfo } from '@shared/ipc'
+import type {
+  BlockGroup,
+  BlockInstance,
+  BlockType,
+  DeckMode,
+  DeckPreset,
+  DeckSyncState,
+  DeckZone,
+  DockZone,
+  RailEntry
+} from '@shared/deck'
+
+export type { BlockGroup, BlockInstance, BlockType, DeckMode, DeckPreset, DeckZone, RailEntry }
 
 export type Theme = 'light' | 'dark'
 
@@ -11,31 +24,6 @@ export interface BrowserTab {
   initialUrl?: string
   /** True once a WebContentsView exists for this tab (first navigation). */
   hasContent: boolean
-}
-
-export type BlockType = 'editor' | 'files' | 'terminal' | 'agents' | 'logs'
-export type DeckZone = 'right' | 'bottom'
-export type DeckPreset = 'browsing' | 'building' | 'debugging'
-
-/** One instance of a dev feature. Blocks are peers: any type can have many. */
-export interface BlockInstance {
-  id: string
-  type: BlockType
-  title: string
-}
-
-/** A tabbed stack of blocks docked in a zone. One block is the active tab. */
-export interface BlockGroup {
-  id: string
-  zone: DeckZone
-  blockIds: string[]
-  activeBlockId: string
-}
-
-/** A block collapsed to the rail, remembering where to restore it. */
-export interface RailEntry {
-  blockId: string
-  prevZone: DeckZone
 }
 
 /** Where a dragged block or group is dropped. */
@@ -50,6 +38,14 @@ export const BLOCK_LABELS: Record<BlockType, string> = {
   terminal: 'Terminal',
   agents: 'Agents',
   logs: 'Logs'
+}
+
+/** Which shell window this renderer is: the browser, the detached deck, or a float. */
+export function getWindowRole(): { kind: 'main' | 'deck' | 'float'; groupId?: string } {
+  const hash = window.location.hash.replace(/^#/, '')
+  if (hash === 'deck') return { kind: 'deck' }
+  if (hash.startsWith('float:')) return { kind: 'float', groupId: hash.slice('float:'.length) }
+  return { kind: 'main' }
 }
 
 /** Terminals are always numbered (Terminal 1, Terminal 2); others only from 2. */
@@ -137,7 +133,7 @@ function loadLayout(workspacePath: string | null): DeckLayout | null {
   }
 }
 
-export function saveLayout(state: {
+function saveLayout(state: {
   workspace: WorkspaceInfo | null
   blocks: Record<string, BlockInstance>
   groups: BlockGroup[]
@@ -180,6 +176,7 @@ interface ShellState {
   browserStates: Record<string, BrowserTabState>
 
   deckRevealed: boolean
+  deckMode: DeckMode
   blocks: Record<string, BlockInstance>
   groups: BlockGroup[]
   rail: RailEntry[]
@@ -194,6 +191,10 @@ interface ShellState {
   updateBrowserState(state: BrowserTabState): void
 
   toggleDeck(): void
+  /** Pop the whole deck out into its own IDE window. */
+  detachDeck(): void
+  /** Merge the detached deck back into the browser window. */
+  attachDeck(): void
   activateBlock(groupId: string, blockId: string): void
   /** Open another instance of `type` as a new tab in `groupId`. */
   addBlockToGroup(groupId: string, type: BlockType): void
@@ -220,6 +221,7 @@ export const useShellStore = create<ShellState>((set) => ({
   browserStates: {},
 
   deckRevealed: false,
+  deckMode: 'attached',
   blocks: initialDeck.blocks,
   groups: initialDeck.groups,
   rail: initialDeck.rail,
@@ -275,6 +277,10 @@ export const useShellStore = create<ShellState>((set) => ({
 
   toggleDeck: () => set((state) => ({ deckRevealed: !state.deckRevealed })),
 
+  detachDeck: () => set({ deckMode: 'detached', deckRevealed: false }),
+
+  attachDeck: () => set({ deckMode: 'attached', deckRevealed: true }),
+
   activateBlock: (groupId, blockId) =>
     set((state) => ({
       groups: state.groups.map((g) => (g.id === groupId ? { ...g, activeBlockId: blockId } : g))
@@ -317,8 +323,6 @@ export const useShellStore = create<ShellState>((set) => ({
             ? { ...g, blockIds: [...g.blockIds, blockId], activeBlockId: blockId }
             : g
         )
-        // Stack target dissolved with the removal (source == target edge): fall
-        // back to a fresh group in the source zone.
         if (!groups.some((g) => g.blockIds.includes(blockId))) {
           groups = [
             ...groups,
@@ -332,7 +336,6 @@ export const useShellStore = create<ShellState>((set) => ({
         if (index < 0) groups = [...groups, fresh]
         else groups = [...groups.slice(0, index), fresh, ...groups.slice(index)]
       } else {
-        // Splitting a single-block group into its own zone is a no-op move.
         if (source.blockIds.length === 1 && source.zone === target.zone) return {}
         groups = [
           ...groups,
@@ -369,8 +372,7 @@ export const useShellStore = create<ShellState>((set) => ({
         const moved = { ...source, zone: rest[index].zone }
         return { groups: [...rest.slice(0, index), moved, ...rest.slice(index)] }
       }
-      if (source.zone === target.zone) {
-        // Append to the end of its own zone (reorder to last).
+      if (source.zone === target.zone && target.zone !== 'floating') {
         const rest = state.groups.filter((g) => g.id !== groupId)
         return { groups: [...rest, source] }
       }
@@ -383,9 +385,10 @@ export const useShellStore = create<ShellState>((set) => ({
     set((state) => {
       const source = state.groups.find((g) => g.blockIds.includes(blockId))
       if (!source) return {}
+      const prevZone: DockZone = source.zone === 'floating' ? 'right' : source.zone
       return {
         groups: withoutBlock(state.groups, blockId),
-        rail: [...state.rail, { blockId, prevZone: source.zone }]
+        rail: [...state.rail, { blockId, prevZone }]
       }
     }),
 
@@ -435,19 +438,44 @@ export const useShellStore = create<ShellState>((set) => ({
     })
 }))
 
-// Persist the deck layout (debounced) whenever it changes.
-let saveTimer: ReturnType<typeof setTimeout> | null = null
-let lastLayout: { blocks: unknown; groups: unknown; rail: unknown } | null = null
-useShellStore.subscribe((state) => {
-  if (
-    lastLayout &&
-    lastLayout.blocks === state.blocks &&
-    lastLayout.groups === state.groups &&
-    lastLayout.rail === state.rail
-  ) {
-    return
+/* ---- Cross-window sync + persistence ---- */
+
+let applyingRemote = false
+
+/** Apply a layout slice broadcast by another shell window. */
+export function applyRemoteState(state: DeckSyncState): void {
+  applyingRemote = true
+  try {
+    useShellStore.setState(state)
+  } finally {
+    applyingRemote = false
   }
-  lastLayout = { blocks: state.blocks, groups: state.groups, rail: state.rail }
+}
+
+export function currentSyncState(): DeckSyncState {
+  const s = useShellStore.getState()
+  return { blocks: s.blocks, groups: s.groups, rail: s.rail, deckMode: s.deckMode }
+}
+
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+// Seed with the boot state so unrelated changes (workspace, tabs, theme)
+// never broadcast — a fresh window broadcasting its stale persisted layout
+// would clobber the live state in every other window.
+let lastSlice: DeckSyncState = currentSyncState()
+useShellStore.subscribe((state) => {
+  const changed =
+    lastSlice.blocks !== state.blocks ||
+    lastSlice.groups !== state.groups ||
+    lastSlice.rail !== state.rail ||
+    lastSlice.deckMode !== state.deckMode
+  if (!changed) return
+  lastSlice = {
+    blocks: state.blocks,
+    groups: state.groups,
+    rail: state.rail,
+    deckMode: state.deckMode
+  }
+  if (!applyingRemote) void window.agweb.windows.broadcastState(lastSlice)
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(() => saveLayout(useShellStore.getState()), 400)
 })

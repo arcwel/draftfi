@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IpcChannels, IpcEvents } from '@shared/ipc'
 import type { AgwebApi, BrowserTabState, WorkspaceInfo } from '@shared/ipc'
+import type { DeckSyncState } from '@shared/deck'
 
 /**
  * The only bridge between the sandboxed renderer and the main process.
@@ -41,6 +42,28 @@ const api: AgwebApi = {
       const handler = (_event: unknown, url: string): void => listener(url)
       ipcRenderer.on(IpcEvents.browserOpenTab, handler)
       return () => ipcRenderer.removeListener(IpcEvents.browserOpenTab, handler)
+    }
+  },
+  windows: {
+    openDeck: () => ipcRenderer.invoke(IpcChannels.deckOpen),
+    closeDeck: () => ipcRenderer.invoke(IpcChannels.deckClose),
+    focusDeck: () => ipcRenderer.invoke(IpcChannels.deckFocus),
+    syncFloats: (groupIds) => ipcRenderer.invoke(IpcChannels.floatSync, groupIds),
+    broadcastState: (state) => ipcRenderer.invoke(IpcChannels.shellBroadcast, state),
+    onStateSync: (listener) => {
+      const handler = (_event: unknown, state: DeckSyncState): void => listener(state)
+      ipcRenderer.on(IpcEvents.shellSync, handler)
+      return () => ipcRenderer.removeListener(IpcEvents.shellSync, handler)
+    },
+    onRequestSync: (listener) => {
+      const handler = (): void => listener()
+      ipcRenderer.on(IpcEvents.requestSync, handler)
+      return () => ipcRenderer.removeListener(IpcEvents.requestSync, handler)
+    },
+    onDeckClosed: (listener) => {
+      const handler = (): void => listener()
+      ipcRenderer.on(IpcEvents.deckWindowClosed, handler)
+      return () => ipcRenderer.removeListener(IpcEvents.deckWindowClosed, handler)
     }
   }
 }

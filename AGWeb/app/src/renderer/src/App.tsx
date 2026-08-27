@@ -6,20 +6,17 @@ import { Deck } from '@/components/Deck'
 import { useShellStore } from '@/store'
 import { useThemeEffect } from '@/theme'
 import { useShortcut } from '@/shortcuts'
+import { useWindowReconciler } from '@/windowSync'
 
 export default function App(): React.JSX.Element {
   const deckRevealed = useShellStore((s) => s.deckRevealed)
+  const deckMode = useShellStore((s) => s.deckMode)
   const hasRail = useShellStore((s) => s.rail.length > 0)
   const { toggleDeck, newTab, closeTab } = useShellStore()
-  const setWorkspace = useShellStore((s) => s.setWorkspace)
   const setTheme = useShellStore((s) => s.setTheme)
 
   useThemeEffect()
-
-  useEffect(() => {
-    void window.agweb.getCurrentWorkspace().then(setWorkspace)
-    return window.agweb.onWorkspaceChanged(setWorkspace)
-  }, [setWorkspace])
+  useWindowReconciler()
 
   // Route embedded-browser events into the store: live navigation state, and
   // pages requesting a new window become new browser tabs.
@@ -37,7 +34,10 @@ export default function App(): React.JSX.Element {
   useShortcut(
     'mod+d',
     'Reveal / hide the Dev Deck',
-    useCallback(() => toggleDeck(), [toggleDeck])
+    useCallback(() => {
+      if (useShellStore.getState().deckMode === 'detached') void window.agweb.windows.focusDeck()
+      else toggleDeck()
+    }, [toggleDeck])
   )
   useShortcut(
     'mod+t',
@@ -57,13 +57,15 @@ export default function App(): React.JSX.Element {
     }, [setTheme])
   )
 
+  const revealed = deckRevealed && deckMode === 'attached'
+
   return (
     <div className="flex h-full flex-col bg-slate-100 text-slate-900 dark:bg-[#0b0f14] dark:text-slate-100">
       <TabStrip />
       <Toolbar />
-      <div className={`workspace ${deckRevealed ? 'revealed' : ''} ${hasRail ? 'has-rail' : ''}`}>
+      <div className={`workspace ${revealed ? 'revealed' : ''} ${hasRail ? 'has-rail' : ''}`}>
         <Stage />
-        <Deck />
+        {deckMode === 'attached' && <Deck />}
       </div>
     </div>
   )

@@ -22,6 +22,15 @@ import {
   withTab
 } from './browser'
 import type { Rect } from '@shared/ipc'
+import {
+  broadcast,
+  closeAllChildWindows,
+  closeDeckWindow,
+  focusDeckWindow,
+  initWindows,
+  openDeckWindow,
+  syncFloatWindows
+} from './windows'
 
 const MAX_RENDERER_RESTARTS = 3
 
@@ -93,12 +102,14 @@ function createMainWindow(): void {
   // window object is destroyed and removeChildView would throw, hanging quit.
   mainWindow.on('close', () => {
     destroyAllBrowserTabs()
+    closeAllChildWindows()
   })
   mainWindow.on('closed', () => {
     mainWindow = null
   })
 
   initBrowser(mainWindow)
+  initWindows(mainWindow)
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -120,14 +131,14 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IpcChannels.workspaceOpen, async () => {
     const workspace = await openWorkspaceDialog()
-    if (workspace) mainWindow?.webContents.send(IpcEvents.workspaceChanged, workspace)
+    if (workspace) broadcast(IpcEvents.workspaceChanged, workspace, null)
     return workspace
   })
 
   ipcMain.handle(IpcChannels.workspaceOpenPath, (_event, path: unknown) => {
     if (typeof path !== 'string') return null
     const workspace = openWorkspacePath(path)
-    if (workspace) mainWindow?.webContents.send(IpcEvents.workspaceChanged, workspace)
+    if (workspace) broadcast(IpcEvents.workspaceChanged, workspace, null)
     return workspace
   })
 
@@ -188,6 +199,18 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IpcChannels.browserDevTools, (_e, id: unknown) => {
     const t = tabId(id)
     if (t) withTab(t, (v) => v.webContents.openDevTools({ mode: 'detach' }))
+  })
+
+  ipcMain.handle(IpcChannels.deckOpen, () => openDeckWindow())
+  ipcMain.handle(IpcChannels.deckClose, () => closeDeckWindow())
+  ipcMain.handle(IpcChannels.deckFocus, () => focusDeckWindow())
+  ipcMain.handle(IpcChannels.floatSync, (_e, ids: unknown) => {
+    if (Array.isArray(ids) && ids.every((id) => typeof id === 'string')) {
+      syncFloatWindows(ids as string[])
+    }
+  })
+  ipcMain.handle(IpcChannels.shellBroadcast, (event, payload: unknown) => {
+    broadcast(IpcEvents.shellSync, payload, event.sender.id)
   })
 }
 

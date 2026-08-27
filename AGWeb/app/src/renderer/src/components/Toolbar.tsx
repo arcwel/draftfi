@@ -1,6 +1,13 @@
 import { useState } from 'react'
 import { useShellStore, type DeckPreset } from '@/store'
-import { BackIcon, CloseIcon, DeckIcon, ForwardIcon, ReloadIcon } from '@/components/icons'
+import {
+  BackIcon,
+  CloseIcon,
+  DeckIcon,
+  ForwardIcon,
+  PopOutIcon,
+  ReloadIcon
+} from '@/components/icons'
 
 const PRESETS: { id: DeckPreset; label: string; hint: string }[] = [
   { id: 'browsing', label: 'Browsing', hint: 'Deck hidden — just the web' },
@@ -34,7 +41,9 @@ export function Toolbar(): React.JSX.Element {
   const activeTabId = useShellStore((s) => s.activeTabId)
   const state = useShellStore((s) => s.browserStates[s.activeTabId])
   const deckRevealed = useShellStore((s) => s.deckRevealed)
+  const deckMode = useShellStore((s) => s.deckMode)
   const toggleDeck = useShellStore((s) => s.toggleDeck)
+  const detachDeck = useShellStore((s) => s.detachDeck)
   const applyPreset = useShellStore((s) => s.applyPreset)
   const [urlInput, setUrlInput] = useState('')
   const [editing, setEditing] = useState(false)
@@ -103,25 +112,48 @@ export function Toolbar(): React.JSX.Element {
         className="mx-auto w-full max-w-2xl flex-1 rounded-lg border border-slate-300 bg-slate-50 px-3.5 py-1.5 text-[13px] outline-none focus:border-sky-500 dark:border-slate-700 dark:bg-[#0b0f14]"
       />
 
-      <button
-        onClick={toggleDeck}
-        className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors duration-200 ${
-          deckRevealed
-            ? 'border-sky-600 bg-sky-600 text-white'
-            : 'border-sky-500/40 bg-sky-500/10 text-sky-600 hover:bg-sky-500/20 dark:text-sky-400'
-        }`}
-        aria-label="Toggle Dev Deck"
-      >
-        <DeckIcon />
-        <span>Deck</span>
-        <span
-          className={`rounded px-1.5 py-px text-[10px] font-medium ${
-            deckRevealed ? 'bg-white/20' : 'bg-sky-500/15 text-sky-500 dark:text-sky-300'
-          }`}
+      {deckMode === 'detached' ? (
+        <button
+          onClick={() => void window.agweb.windows.focusDeck()}
+          className="flex items-center gap-2 rounded-lg border border-dashed border-slate-400 px-3 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-800"
+          aria-label="Focus detached deck window"
+          title="The deck is detached — click to focus its window"
         >
-          ⌘D
-        </span>
-      </button>
+          <PopOutIcon />
+          <span>Deck detached</span>
+        </button>
+      ) : (
+        <button
+          onClick={toggleDeck}
+          className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors duration-200 ${
+            deckRevealed
+              ? 'border-sky-600 bg-sky-600 text-white'
+              : 'border-sky-500/40 bg-sky-500/10 text-sky-600 hover:bg-sky-500/20 dark:text-sky-400'
+          }`}
+          aria-label="Toggle Dev Deck"
+        >
+          <DeckIcon />
+          <span>Deck</span>
+          <span
+            className={`rounded px-1.5 py-px text-[10px] font-medium ${
+              deckRevealed ? 'bg-white/20' : 'bg-sky-500/15 text-sky-500 dark:text-sky-300'
+            }`}
+          >
+            ⌘D
+          </span>
+        </button>
+      )}
+
+      {deckRevealed && deckMode === 'attached' && (
+        <button
+          onClick={detachDeck}
+          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+          aria-label="Detach deck"
+          title="Detach the deck into its own window"
+        >
+          <PopOutIcon />
+        </button>
+      )}
 
       <div className="relative">
         <button

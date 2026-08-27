@@ -1,0 +1,38 @@
+/** Dev Deck domain types, shared by main and every renderer window. */
+
+export type BlockType = 'editor' | 'files' | 'terminal' | 'agents' | 'logs'
+/** Zones a group can dock into inside a window. */
+export type DockZone = 'right' | 'bottom'
+/** A group can also float in its own OS window. */
+export type DeckZone = DockZone | 'floating'
+export type DeckMode = 'attached' | 'detached'
+export type DeckPreset = 'browsing' | 'building' | 'debugging'
+
+/** One instance of a dev feature. Blocks are peers: any type can have many. */
+export interface BlockInstance {
+  id: string
+  type: BlockType
+  title: string
+}
+
+/** A tabbed stack of blocks. One block is the active tab. */
+export interface BlockGroup {
+  id: string
+  zone: DeckZone
+  blockIds: string[]
+  activeBlockId: string
+}
+
+/** A block collapsed to the rail, remembering where to restore it. */
+export interface RailEntry {
+  blockId: string
+  prevZone: DockZone
+}
+
+/** The layout slice mirrored across windows (browser, deck, floats). */
+export interface DeckSyncState {
+  blocks: Record<string, BlockInstance>
+  groups: BlockGroup[]
+  rail: RailEntry[]
+  deckMode: DeckMode
+}

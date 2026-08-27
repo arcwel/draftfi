@@ -62,14 +62,22 @@ export const IpcChannels = {
   browserSetBounds: 'browser:set-bounds',
   browserSetVisible: 'browser:set-visible',
   browserSetCornerRadius: 'browser:set-corner-radius',
-  browserDevTools: 'browser:devtools'
+  browserDevTools: 'browser:devtools',
+  deckOpen: 'deck:open',
+  deckClose: 'deck:close',
+  deckFocus: 'deck:focus',
+  floatSync: 'float:sync',
+  shellBroadcast: 'shell:broadcast'
 } as const
 
 /** Events pushed from main to the renderer. */
 export const IpcEvents = {
   workspaceChanged: 'event:workspace-changed',
   browserState: 'event:browser-state',
-  browserOpenTab: 'event:browser-open-tab'
+  browserOpenTab: 'event:browser-open-tab',
+  shellSync: 'event:shell-sync',
+  requestSync: 'event:request-sync',
+  deckWindowClosed: 'event:deck-window-closed'
 } as const
 
 /** The API surface exposed on `window.agweb` by the preload bridge. */
@@ -103,5 +111,21 @@ export interface AgwebApi {
     onState(listener: (state: BrowserTabState) => void): () => void
     /** Fired when a page requests a new window (target=_blank etc.). */
     onOpenTab(listener: (url: string) => void): () => void
+  }
+
+  /** Multi-window deck: the detached IDE window, float windows, state sync. */
+  windows: {
+    openDeck(): Promise<void>
+    closeDeck(): Promise<void>
+    focusDeck(): Promise<void>
+    /** Reconcile float windows to exactly these floating group ids. */
+    syncFloats(groupIds: string[]): Promise<void>
+    /** Mirror the deck layout slice to every other window. */
+    broadcastState(state: import('./deck').DeckSyncState): Promise<void>
+    onStateSync(listener: (state: import('./deck').DeckSyncState) => void): () => void
+    /** Main window only: another window booted and needs the current state. */
+    onRequestSync(listener: () => void): () => void
+    /** The detached deck window was closed (by Dock back or the OS). */
+    onDeckClosed(listener: () => void): () => void
   }
 }
