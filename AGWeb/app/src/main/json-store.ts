@@ -7,13 +7,15 @@ import { dirname, join } from 'node:path'
  * Writes go to a temp file first so a crash mid-write can't corrupt state.
  */
 export class JsonStore<T> {
-  private readonly file: string
-
   constructor(
-    name: string,
+    private readonly name: string,
     private readonly defaults: T
-  ) {
-    this.file = join(app.getPath('userData'), `${name}.json`)
+  ) {}
+
+  /** Resolved lazily: stores are constructed at module import, which runs
+   *  before index.ts applies the AGWEB_USER_DATA override via app.setPath. */
+  private get file(): string {
+    return join(app.getPath('userData'), `${this.name}.json`)
   }
 
   read(): T {

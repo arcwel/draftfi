@@ -105,10 +105,10 @@ Build our own thin viewer shell composed from open-source rendering primitives (
 
 ## Phase 8 — Artifacts & Execution Reports
 
-- [ ] 8.1 Artifact store: terminal logs, code diffs, screenshots, recordings, keyed to task/plan runs
-- [ ] 8.2 Execution report generator: human-readable summary bundling artifacts for user review
-- [ ] 8.3 Report viewer UI in Mission Control with drill-down to individual artifacts
-- [ ] 8.4 Artifact retention/cleanup policy and disk-usage controls
+- [x] 8.1 Artifact store (`src/main/agent-report.ts`): per-session directories under `userData/artifacts/<sessionId>` holding the execution report; command logs, code diffs, and screenshot references persist in the session log (recordings await 7.4)
+- [x] 8.2 Execution report generator: self-contained report.html per finished session — status, plan, full timeline, before/after file diffs, and screenshots embedded as data URIs so evidence survives workspace cleanup; auto-generated on completion
+- [x] 8.3 Report viewer: Report button on finished sessions in Mission Control opens the report in a browser tab, with drill-down sections for the timeline, each file change, and each screenshot
+- [x] 8.4 Retention/cleanup: oldest finished sessions and their artifact directories pruned beyond a 50-session cap at startup; "Clear finished" control removes finished sessions and their artifacts on demand
 
 ## Phase 9 — Security & Permission Modes
 

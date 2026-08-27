@@ -3,7 +3,7 @@
 // presets, drag-to-stack, rail, float window, detached deck window.
 // Usage: node scripts/smoke.mjs [screenshot.png]   (run under xvfb on CI)
 import { _electron as electron } from 'playwright-core'
-import { mkdtempSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -44,13 +44,14 @@ mkdirSync(join(workspace, 'src'))
 writeFileSync(join(workspace, 'src', 'index.ts'), 'export const answer = 42\n')
 writeFileSync(join(workspace, 'src', 'messy.ts'), 'const messy={alpha:1,beta:2}\n')
 
+const userData = mkdtempSync(join(tmpdir(), 'agweb-data-'))
 const app = await electron.launch({
   args: ['out/main/index.js', '--no-sandbox'],
   cwd: new URL('..', import.meta.url).pathname,
   env: {
     ...process.env,
     AGWEB_WORKSPACE: workspace,
-    AGWEB_USER_DATA: mkdtempSync(join(tmpdir(), 'agweb-data-')),
+    AGWEB_USER_DATA: userData,
     // Deterministic offline agent provider: same plan/approve/execute flow,
     // no API key or network.
     AGWEB_AGENT_MOCK: '1'
@@ -153,6 +154,20 @@ try {
   )
   await window.screenshot({ path: screenshotPath.replace(/\.png$/, '-agents.png') })
 
+  // Execution report (Phase 8): written to the artifact store with the diff
+  // and the screenshot embedded, and opened as a browser tab on demand.
+  await window.waitForSelector('text=Execution report ready.', { timeout: 10000 })
+  await window.click('[data-testid="agent-report"]')
+  await window.waitForSelector('text=Agent report', { timeout: 15000 })
+  await waitFor(
+    () => {
+      const html = readFileSync(join(userData, 'artifacts', 'agent-1', 'report.html'), 'utf8')
+      return html.includes('clicked-ok') && html.includes('data:image/png;base64,')
+    },
+    10000,
+    'execution report was not written with embedded artifacts'
+  )
+
   // Document Studio: markdown renders styled in a doc tab (with highlighted
   // code, KaTeX math, and a Mermaid diagram); Source toggles to Monaco;
   // JSON gets the tree inspector; CSV gets the sortable table.
@@ -242,6 +257,16 @@ try {
   await deckWin.screenshot({ path: screenshotPath.replace(/\.png$/, '-deckwin.png') })
   await deckWin.click('text=Dock back')
   await window.waitForSelector('.workspace.revealed', { timeout: 5000 })
+
+  // Artifact retention control: clearing finished sessions empties the
+  // roster (and deletes the session's artifact directory).
+  await window.click('[data-testid="agent-clear-finished"]')
+  await window.waitForSelector('text=No agent sessions yet.', { timeout: 5000 })
+  await waitFor(
+    () => !existsSync(join(userData, 'artifacts', 'agent-1')),
+    5000,
+    'artifact directory was not removed'
+  )
 
   console.log(`smoke OK — screenshot: ${screenshotPath}`)
 } finally {

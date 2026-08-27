@@ -90,7 +90,9 @@ export const IpcChannels = {
   agentStop: 'agent:stop',
   agentList: 'agent:list',
   agentKeyStatus: 'agent:key-status',
-  agentSetKey: 'agent:set-key'
+  agentSetKey: 'agent:set-key',
+  agentOpenReport: 'agent:open-report',
+  agentClearFinished: 'agent:clear-finished'
 } as const
 
 /** One project-search match. */
@@ -112,7 +114,8 @@ export const IpcEvents = {
   fsChanged: 'event:fs-changed',
   termData: 'event:term-data',
   termExit: 'event:term-exit',
-  agentUpdate: 'event:agent-update'
+  agentUpdate: 'event:agent-update',
+  agentSessionsReset: 'event:agent-sessions-reset'
 } as const
 
 export interface FsEntry {
@@ -206,8 +209,14 @@ export interface AgwebApi {
     list(): Promise<import('./agents').AgentSessionInfo[]>
     keyStatus(): Promise<import('./agents').AgentKeyStatus>
     setKey(key: string): Promise<import('./agents').AgentKeyStatus>
+    /** Open a finished session's execution report in a browser tab. */
+    openReport(id: string): Promise<void>
+    /** Remove every finished session and its stored artifacts. */
+    clearFinished(): Promise<void>
     /** Fired whenever any session's plan, log, or status changes. */
     onUpdate(listener: (session: import('./agents').AgentSessionInfo) => void): () => void
+    /** Fired after bulk removal: the authoritative remaining session list. */
+    onReset(listener: (sessions: import('./agents').AgentSessionInfo[]) => void): () => void
   }
 
   /** Terminal sessions, keyed by block id; they outlive renderer mounts. */

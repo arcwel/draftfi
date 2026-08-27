@@ -49,6 +49,7 @@ export function AgentsBlock(): React.JSX.Element {
     () => Object.values(agentSessions).sort((a, b) => b.createdAt - a.createdAt),
     [agentSessions]
   )
+  const anyFinished = sessions.some((s) => TERMINAL_STATUSES.has(s.status))
 
   const startTask = async (): Promise<void> => {
     const trimmed = task.trim()
@@ -91,6 +92,18 @@ export function AgentsBlock(): React.JSX.Element {
       </div>
       {startError && (
         <div className="flex-none px-3 py-1.5 text-[11px] text-red-500">{startError}</div>
+      )}
+      {anyFinished && (
+        <div className="flex flex-none justify-end border-b border-slate-200 px-2.5 py-1 dark:border-slate-800">
+          <button
+            onClick={() => void window.agweb.agents.clearFinished()}
+            className="text-[10px] font-semibold text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+            title="Remove finished sessions and their stored artifacts"
+            data-testid="agent-clear-finished"
+          >
+            Clear finished
+          </button>
+        </div>
       )}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {sessions.length === 0 && (
@@ -155,6 +168,13 @@ function KeyBanner(): React.JSX.Element | null {
   )
 }
 
+const TERMINAL_STATUSES: ReadonlySet<AgentStatus> = new Set([
+  'done',
+  'error',
+  'stopped',
+  'rejected'
+])
+
 function SessionCard({
   session,
   onShowDiff
@@ -164,6 +184,7 @@ function SessionCard({
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(true)
   const active = session.status === 'planning' || session.status === 'running'
+  const finished = TERMINAL_STATUSES.has(session.status)
 
   return (
     <div
@@ -192,6 +213,19 @@ function SessionCard({
             className="flex-none rounded border border-slate-300 px-2 py-0.5 text-[10px] font-semibold text-slate-500 hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800"
           >
             Stop
+          </button>
+        )}
+        {finished && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              void window.agweb.agents.openReport(session.id)
+            }}
+            className="flex-none rounded border border-sky-400/60 px-2 py-0.5 text-[10px] font-semibold text-sky-600 hover:bg-sky-50 dark:text-sky-400 dark:hover:bg-sky-500/10"
+            title="Open the execution report (plan, timeline, diffs, screenshots) in a browser tab"
+            data-testid="agent-report"
+          >
+            Report
           </button>
         )}
       </div>

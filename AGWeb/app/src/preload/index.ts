@@ -101,10 +101,17 @@ const api: AgwebApi = {
     list: () => ipcRenderer.invoke(IpcChannels.agentList),
     keyStatus: () => ipcRenderer.invoke(IpcChannels.agentKeyStatus),
     setKey: (key) => ipcRenderer.invoke(IpcChannels.agentSetKey, key),
+    openReport: (id) => ipcRenderer.invoke(IpcChannels.agentOpenReport, id),
+    clearFinished: () => ipcRenderer.invoke(IpcChannels.agentClearFinished),
     onUpdate: (listener) => {
       const handler = (_event: unknown, session: AgentSessionInfo): void => listener(session)
       ipcRenderer.on(IpcEvents.agentUpdate, handler)
       return () => ipcRenderer.removeListener(IpcEvents.agentUpdate, handler)
+    },
+    onReset: (listener) => {
+      const handler = (_event: unknown, sessions: AgentSessionInfo[]): void => listener(sessions)
+      ipcRenderer.on(IpcEvents.agentSessionsReset, handler)
+      return () => ipcRenderer.removeListener(IpcEvents.agentSessionsReset, handler)
     }
   },
   terminal: {

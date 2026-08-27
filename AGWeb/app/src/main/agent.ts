@@ -17,6 +17,7 @@ import {
   agentType,
   agentWaitFor
 } from './agent-browser'
+import { generateReport, removeArtifacts } from './agent-report'
 import { searchWorkspace } from './search'
 import { JsonStore } from './json-store'
 
@@ -36,6 +37,10 @@ const MAX_ITERATIONS = 40
 const COMMAND_TIMEOUT_MS = 120_000
 const OUTPUT_CAP = 20_000
 const LOG_CAP = 500
+/** Retention cap: oldest finished sessions (and their artifacts) are pruned. */
+const SESSION_CAP = 50
+
+const TERMINAL: ReadonlySet<string> = new Set(['done', 'error', 'stopped', 'rejected'])
 
 interface AgentSession extends AgentSessionInfo {
   stopRequested: boolean
@@ -71,6 +76,13 @@ function update(session: AgentSession, patch: Partial<AgentSessionInfo>): void {
   Object.assign(session, patch)
   broadcast(IpcEvents.agentUpdate, toInfo(session), null)
   persistSessions()
+  // A finished session gets its execution report written to the artifact
+  // store, so the evidence survives even if the workspace changes later.
+  if (patch.status && TERMINAL.has(patch.status)) {
+    void generateReport(toInfo(session))
+      .then(() => log(session, { kind: 'status', text: 'Execution report ready.' }))
+      .catch(() => {})
+  }
 }
 
 function log(session: AgentSession, entry: Omit<AgentLogEntry, 'ts'>): void {
@@ -93,6 +105,15 @@ export function initAgents(): void {
     sessions.set(session.id, session)
     nextSessionId = Math.max(nextSessionId, Number(session.id.replace('agent-', '')) + 1 || 1)
   }
+  // Retention: drop the oldest finished sessions beyond the cap, artifacts too.
+  const finished = [...sessions.values()]
+    .filter((s) => TERMINAL.has(s.status))
+    .sort((a, b) => b.createdAt - a.createdAt)
+  for (const old of finished.slice(SESSION_CAP)) {
+    sessions.delete(old.id)
+    void removeArtifacts(old.id)
+  }
+  persistSessions()
 }
 
 export function listAgentSessions(): AgentSessionInfo[] {
@@ -109,6 +130,27 @@ export function getAgentKeyStatus(): AgentKeyStatus {
 
 export function setAgentApiKey(key: string): void {
   settingsStore.write({ apiKey: key.trim() || undefined })
+}
+
+/** Open (regenerating if needed) a session's execution report in a browser tab. */
+export async function openAgentReport(id: string): Promise<void> {
+  const session = sessions.get(id)
+  if (!session) return
+  const path = await generateReport(toInfo(session))
+  broadcast(IpcEvents.browserOpenTab, `file://${path}`, null)
+}
+
+/** Disk-usage control: drop every finished session and its artifacts. */
+export function clearFinishedAgentSessions(): AgentSessionInfo[] {
+  for (const session of [...sessions.values()]) {
+    if (!TERMINAL.has(session.status)) continue
+    sessions.delete(session.id)
+    void removeArtifacts(session.id)
+  }
+  persistSessions()
+  const remaining = listAgentSessions()
+  broadcast(IpcEvents.agentSessionsReset, remaining, null)
+  return remaining
 }
 
 /* ---- Lifecycle ---- */

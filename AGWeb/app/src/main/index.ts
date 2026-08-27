@@ -52,9 +52,11 @@ import { searchWorkspace } from './search'
 import { exportCapture, exportHtml, exportPdf } from './export'
 import {
   approveAgentPlan,
+  clearFinishedAgentSessions,
   getAgentKeyStatus,
   initAgents,
   listAgentSessions,
+  openAgentReport,
   rejectAgentPlan,
   setAgentApiKey,
   startAgentTask,
@@ -362,6 +364,13 @@ function registerIpcHandlers(): void {
     if (s) stopAgent(s)
   })
   ipcMain.handle(IpcChannels.agentList, () => listAgentSessions())
+  ipcMain.handle(IpcChannels.agentOpenReport, (_e, id: unknown) => {
+    const s = str(id)
+    return s ? openAgentReport(s) : undefined
+  })
+  ipcMain.handle(IpcChannels.agentClearFinished, () => {
+    clearFinishedAgentSessions()
+  })
   ipcMain.handle(IpcChannels.agentKeyStatus, () => getAgentKeyStatus())
   ipcMain.handle(IpcChannels.agentSetKey, (_e, key: unknown) => {
     setAgentApiKey(str(key) ?? '')

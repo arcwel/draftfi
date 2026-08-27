@@ -32,7 +32,12 @@ export function useShellSync(roleKind: 'main' | 'deck' | 'float'): void {
   useEffect(() => {
     const { setAgentSessions, upsertAgentSession } = useShellStore.getState()
     void window.agweb.agents.list().then(setAgentSessions)
-    return window.agweb.agents.onUpdate(upsertAgentSession)
+    const offUpdate = window.agweb.agents.onUpdate(upsertAgentSession)
+    const offReset = window.agweb.agents.onReset(setAgentSessions)
+    return () => {
+      offUpdate()
+      offReset()
+    }
   }, [])
 }
 
