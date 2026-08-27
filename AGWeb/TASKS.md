@@ -2,30 +2,30 @@
 
 Derived from `AGWeb/PRD.md`. Phases are ordered by dependency; tasks within a phase can often run in parallel.
 
-**Status:** Draft — awaiting review. No implementation started.
+**Status:** Phase 1 complete. App scaffolded under `app/` (Electron + React + TS + Tailwind via electron-vite); shell builds clean (`npm run typecheck`, `npm run build`) and passes an automated Electron smoke test (`scripts/smoke.mjs`: launches app, opens tabs, toggles dock/theme, screenshots). Remaining Phase 0 items (ESLint/Prettier, CI, Python tooling) are tracked below. See `RESOURCES.md` for the full techniques/repos/resources inventory.
 
 ---
 
 ## Phase 0 — Project Setup & Scaffolding
 
-- [ ] 0.1 Initialize project structure inside `AGWeb/` with `.gitignore` (Node, Electron build output, Python, `.env`)
-- [ ] 0.2 Choose and document open-source license consistent with Electron/Chromium/Code - OSS dependencies (MIT recommended)
-- [ ] 0.3 Scaffold Electron + TypeScript + React app (main process, preload, renderer) with Vite bundling
-- [ ] 0.4 Add Tailwind CSS and base design tokens for the Mission Control shell
-- [ ] 0.5 Integrate Monaco Editor as the embedded code editor component
+- [x] 0.1 Initialize project structure inside `AGWeb/` with `.gitignore` (Node, Electron build output, Python, `.env`)
+- [x] 0.2 Choose and document open-source license consistent with Electron/Chromium/Code - OSS dependencies — MIT (inherits repo `LICENSE`)
+- [x] 0.3 Scaffold Electron + TypeScript + React app (main process, preload, renderer) with Vite bundling — electron-vite under `app/`
+- [x] 0.4 Add Tailwind CSS and base design tokens for the Mission Control shell — Tailwind v4
+- [ ] 0.5 Integrate Monaco Editor as the embedded code editor component (moved to Phase 3 editor work)
 - [ ] 0.6 Set up Python tooling workspace (`backend/` or `tools/`) with venv, ruff, pytest for agent/proxy backend services
-- [ ] 0.7 Dev tooling: ESLint, Prettier, TypeScript strict mode, pre-commit hooks
+- [ ] 0.7 Dev tooling: ESLint, Prettier, pre-commit hooks (TypeScript strict mode ✅)
 - [ ] 0.8 CI pipeline: lint + typecheck + unit tests on push
-- [ ] 0.9 Write `AGWeb/README.md` with vision, architecture diagram, and dev setup steps
+- [x] 0.9 Write `AGWeb/README.md` with vision, architecture overview, and dev setup steps
 
 ## Phase 1 — Application Shell & Window Management
 
-- [ ] 1.1 Electron main-process architecture: window lifecycle, single-instance lock, crash recovery
-- [ ] 1.2 Multi-pane layout shell: sidebar (projects/agents), tabbed center stage (editor / browser / slides), bottom dock (terminal / logs)
-- [ ] 1.3 Secure IPC contract between main, preload, and renderer (contextIsolation on, no nodeIntegration in renderer)
-- [ ] 1.4 Cross-window communication layer using PostMessage/Postmate for embedded previews
-- [ ] 1.5 Workspace/project model: open folder, recent projects, per-project state persistence
-- [ ] 1.6 Theming (light/dark) and keyboard-shortcut framework
+- [x] 1.1 Electron main-process architecture: window lifecycle, single-instance lock, crash recovery — bounded renderer auto-reload, window-state persistence clamped to attached displays
+- [x] 1.2 Multi-pane layout shell: sidebar (projects/agents), tabbed center stage (editor / browser / slides), bottom dock (terminal / logs) — plus status bar; later-phase panes are placeholders
+- [x] 1.3 Secure IPC contract between main, preload, and renderer — typed `window.agweb` API in `src/shared/ipc.ts`; contextIsolation + sandbox on, nodeIntegration off, strict CSP
+- [x] 1.4 Cross-window communication layer using PostMessage/Postmate for embedded previews — `PreviewChannel` handshake protocol with origin pinning (`src/renderer/src/preview/messaging.ts`)
+- [x] 1.5 Workspace/project model: open folder, recent projects, per-project state persistence — atomic JSON stores in `userData`; richer per-project UI state grows with Phases 2–3
+- [x] 1.6 Theming (light/dark) and keyboard-shortcut framework — persisted theme synced to nativeTheme; registry-based shortcuts (`mod+b/j/t/w`, `mod+shift+l`) listed on the Welcome view
 
 ## Phase 2 — Integrated Browser (Chromium)
 
