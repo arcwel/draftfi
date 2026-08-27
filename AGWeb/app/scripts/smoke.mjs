@@ -12,7 +12,12 @@ const screenshotPath = process.argv[2] ?? 'smoke.png'
 // Throwaway workspace + user data so runs are deterministic and never touch
 // real projects or accumulated layout state.
 const workspace = mkdtempSync(join(tmpdir(), 'agweb-ws-'))
-writeFileSync(join(workspace, 'hello.md'), 'hello agweb\n')
+writeFileSync(
+  join(workspace, 'hello.md'),
+  '# Hello Studio\n\nhello agweb\n\n- [x] tasks render\n\n| col | value |\n| --- | ----- |\n| one | 1 |\n'
+)
+writeFileSync(join(workspace, 'data.json'), '{"name":"agweb","tags":["ide","browser"]}\n')
+writeFileSync(join(workspace, 'table.csv'), 'city,pop\nTokyo,37\nDelhi,32\n')
 mkdirSync(join(workspace, 'src'))
 writeFileSync(join(workspace, 'src', 'index.ts'), 'export const answer = 42\n')
 
@@ -41,17 +46,19 @@ try {
   await window.keyboard.press('ControlOrMeta+d')
   await window.waitForSelector('.workspace.revealed', { timeout: 5000 })
 
-  // Files tree → editor: open a file, verify content, edit, save, check disk.
-  await window.waitForSelector('text=hello.md', { timeout: 10000 })
-  await window.click('text=hello.md')
+  // Files tree → editor: open a source file, verify, edit, save, check disk.
+  await window.waitForSelector('text=src', { timeout: 10000 })
+  await window.click('text=src')
+  await window.waitForSelector('text=index.ts')
+  await window.click('text=index.ts')
   await window.waitForSelector('.monaco-editor', { timeout: 15000 })
-  await window.waitForSelector('text=hello agweb', { timeout: 15000 })
+  await window.waitForSelector('text=answer', { timeout: 15000 })
   await window.click('.monaco-editor .view-lines')
   await window.keyboard.press('ControlOrMeta+End')
-  await window.keyboard.type('smoke-edit')
+  await window.keyboard.type('// smoke-edit')
   await window.keyboard.press('ControlOrMeta+s')
   await waitFor(
-    () => readFileSync(join(workspace, 'hello.md'), 'utf8').includes('smoke-edit'),
+    () => readFileSync(join(workspace, 'src', 'index.ts'), 'utf8').includes('smoke-edit'),
     10000,
     'file save did not reach disk'
   )
@@ -63,8 +70,27 @@ try {
   await window.keyboard.press('Enter')
   await window.waitForSelector('text=smoke-42', { timeout: 15000 })
 
+  // Document Studio: markdown renders styled in a doc tab; Source toggles to
+  // Monaco; JSON gets the tree inspector; CSV gets the sortable table.
+  await window.click('text=hello.md')
+  await window.waitForSelector('h1:has-text("Hello Studio")', { timeout: 15000 })
+  await window.waitForSelector('text=tasks render')
   await window.waitForTimeout(400)
   await window.screenshot({ path: screenshotPath })
+
+  await window.click('button:has-text("Source")')
+  await window.locator('.stage .monaco-editor').waitFor({ timeout: 15000 })
+  await window.click('button:has-text("Styled")')
+  await window.waitForSelector('h1:has-text("Hello Studio")')
+
+  await window.click('text=data.json')
+  await window.waitForSelector('text=tags', { timeout: 15000 })
+  await window.waitForSelector('text=array') // the tags node's type badge (array·2)
+
+  await window.click('text=table.csv')
+  await window.waitForSelector('th:has-text("city")', { timeout: 15000 })
+  await window.waitForSelector('text=Tokyo')
+  await window.screenshot({ path: screenshotPath.replace(/\.png$/, '-csv.png') })
 
   // Layout preset: Debugging stacks terminals with a fresh Logs block.
   await window.click('button:has-text("Layout")')

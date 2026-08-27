@@ -39,6 +39,7 @@ export async function navigateTab(tabId: string, url: string): Promise<void> {
 
 export function Toolbar(): React.JSX.Element {
   const activeTabId = useShellStore((s) => s.activeTabId)
+  const activeTab = useShellStore((s) => s.tabs.find((t) => t.id === s.activeTabId))
   const state = useShellStore((s) => s.browserStates[s.activeTabId])
   const deckRevealed = useShellStore((s) => s.deckRevealed)
   const deckMode = useShellStore((s) => s.deckMode)
@@ -95,7 +96,8 @@ export function Toolbar(): React.JSX.Element {
       </div>
 
       <input
-        value={displayedUrl}
+        value={activeTab?.kind === 'doc' ? `studio · ${activeTab.docPath}` : displayedUrl}
+        disabled={activeTab?.kind === 'doc'}
         placeholder="Enter URL or search…"
         spellCheck={false}
         onChange={(e) => {

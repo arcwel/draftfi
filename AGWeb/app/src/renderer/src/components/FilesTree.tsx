@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FsEntry, RecentProject } from '@shared/ipc'
-import { useShellStore } from '@/store'
+import { isDocFile, useShellStore } from '@/store'
 import { BlockTypeIcon, CloseIcon } from '@/components/icons'
 
 /**
@@ -23,7 +23,14 @@ export function FilesTree(): React.JSX.Element {
 
 function WorkspaceTree(): React.JSX.Element {
   const workspace = useShellStore((s) => s.workspace)!
-  const openFile = useShellStore((s) => s.openFile)
+  const openFileInEditor = useShellStore((s) => s.openFile)
+  const openDoc = useShellStore((s) => s.openDoc)
+  // Doc-type files (md/json/yaml/csv…) open in the Document Studio tab;
+  // everything else opens in the Deck's editor.
+  const openFile = (path: string): void => {
+    if (isDocFile(path)) openDoc(path)
+    else openFileInEditor(path)
+  }
   const [tree, setTree] = useState<TreeState>({ children: {}, expanded: new Set() })
   const [selectedDir, setSelectedDir] = useState('')
   const [creating, setCreating] = useState<'file' | 'dir' | null>(null)

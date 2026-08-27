@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { languageForPath, monaco } from '@/monaco'
+import { ensureModel, monaco } from '@/monaco'
 import { useShellStore } from '@/store'
 import { CloseIcon } from '@/components/icons'
 
@@ -8,19 +8,6 @@ import { CloseIcon } from '@/components/icons'
  * (shared by every editor instance in this window); the open-tab list and
  * focused document live in the store, synced across windows.
  */
-
-async function ensureModel(path: string): Promise<monaco.editor.ITextModel | null> {
-  const uri = monaco.Uri.from({ scheme: 'agweb', path: `/${path}` })
-  const existing = monaco.editor.getModel(uri)
-  if (existing) return existing
-  const result = await window.agweb.fs.read(path)
-  if (result.content === undefined) return null
-  const model = monaco.editor.createModel(result.content, languageForPath(path), uri)
-  model.onDidChangeContent(() => {
-    useShellStore.getState().setFileDirty(path, true)
-  })
-  return model
-}
 
 export function EditorBlock(): React.JSX.Element {
   const editorTabs = useShellStore((s) => s.editorTabs)

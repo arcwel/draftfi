@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useShellStore } from '@/store'
 import { StartPage } from '@/components/StartPage'
+import { DocStudio } from '@/components/DocStudio'
 
 /**
  * The stage hosts the active tab's page. With content, the main-process
@@ -10,10 +11,9 @@ import { StartPage } from '@/components/StartPage'
  */
 export function Stage(): React.JSX.Element {
   const activeTabId = useShellStore((s) => s.activeTabId)
-  const hasContent = useShellStore(
-    (s) => s.tabs.find((t) => t.id === s.activeTabId)?.hasContent ?? false
-  )
-  const initialUrl = useShellStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.initialUrl)
+  const activeTab = useShellStore((s) => s.tabs.find((t) => t.id === s.activeTabId))
+  const hasContent = (activeTab?.kind === 'web' && activeTab.hasContent) ?? false
+  const initialUrl = activeTab?.kind === 'web' ? activeTab.initialUrl : undefined
   const deckRevealed = useShellStore((s) => s.deckRevealed)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -68,7 +68,11 @@ export function Stage(): React.JSX.Element {
 
   return (
     <div ref={ref} className="stage bg-white dark:bg-[#101418]">
-      {!hasContent && <StartPage />}
+      {activeTab?.kind === 'doc' && activeTab.docPath ? (
+        <DocStudio key={activeTab.id} path={activeTab.docPath} />
+      ) : (
+        !hasContent && <StartPage />
+      )}
     </div>
   )
 }

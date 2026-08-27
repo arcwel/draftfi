@@ -1,5 +1,5 @@
 import { useShellStore } from '@/store'
-import { CloseIcon, GlobeIcon } from '@/components/icons'
+import { BlockTypeIcon, CloseIcon, GlobeIcon } from '@/components/icons'
 
 export function TabStrip(): React.JSX.Element {
   const { tabs, activeTabId, activateTab, closeTab, newTab } = useShellStore()
@@ -16,7 +16,11 @@ export function TabStrip(): React.JSX.Element {
               : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
           }`}
         >
-          <GlobeIcon size={13} className="shrink-0 text-sky-500" />
+          {tab.kind === 'doc' ? (
+            <BlockTypeIcon type="logs" size={13} className="shrink-0 text-sky-500" />
+          ) : (
+            <GlobeIcon size={13} className="shrink-0 text-sky-500" />
+          )}
           <span className="truncate">{tab.title}</span>
           <button
             onClick={(event) => {

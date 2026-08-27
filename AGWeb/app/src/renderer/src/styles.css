@@ -118,3 +118,131 @@ body,
 .no-drag {
   -webkit-app-region: no-drag;
 }
+
+/* ---- Document Studio: styled Markdown (GitHub-flavored look) ---- */
+
+.doc-md {
+  font-size: 15px;
+  line-height: 1.65;
+  color: #1e293b;
+}
+.dark .doc-md {
+  color: #d3dce6;
+}
+.doc-md h1,
+.doc-md h2 {
+  margin: 1.4em 0 0.6em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid #e2e8f0;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.dark .doc-md h1,
+.dark .doc-md h2 {
+  border-color: #1e293b;
+}
+.doc-md h1 {
+  margin-top: 0;
+  font-size: 1.9em;
+}
+.doc-md h2 {
+  font-size: 1.45em;
+}
+.doc-md h3,
+.doc-md h4 {
+  margin: 1.2em 0 0.5em;
+  font-weight: 650;
+  font-size: 1.15em;
+}
+.doc-md p,
+.doc-md ul,
+.doc-md ol {
+  margin: 0 0 1em;
+}
+.doc-md ul,
+.doc-md ol {
+  padding-left: 1.6em;
+}
+.doc-md li {
+  margin: 0.25em 0;
+}
+.doc-md a {
+  color: #0284c7;
+  text-decoration: none;
+}
+.doc-md a:hover {
+  text-decoration: underline;
+}
+.dark .doc-md a {
+  color: #38bdf8;
+}
+.doc-md code {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.86em;
+  background: #f1f5f9;
+  border-radius: 5px;
+  padding: 0.15em 0.35em;
+}
+.dark .doc-md code {
+  background: #16202e;
+}
+.doc-md pre {
+  margin: 0 0 1em;
+  padding: 14px 16px;
+  overflow-x: auto;
+  background: #f1f5f9;
+  border-radius: 8px;
+}
+.dark .doc-md pre {
+  background: #101827;
+}
+.doc-md pre code {
+  background: none;
+  padding: 0;
+}
+.doc-md blockquote {
+  margin: 0 0 1em;
+  padding: 0.2em 1em;
+  border-left: 3px solid #cbd5e1;
+  color: #64748b;
+}
+.dark .doc-md blockquote {
+  border-color: #334155;
+  color: #94a3b8;
+}
+.doc-md table {
+  margin: 0 0 1em;
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+.doc-md th,
+.doc-md td {
+  border: 1px solid #e2e8f0;
+  padding: 6px 12px;
+}
+.dark .doc-md th,
+.dark .doc-md td {
+  border-color: #1e293b;
+}
+.doc-md th {
+  background: #f8fafc;
+  font-weight: 650;
+}
+.dark .doc-md th {
+  background: #101827;
+}
+.doc-md hr {
+  margin: 1.6em 0;
+  border: none;
+  border-top: 1px solid #e2e8f0;
+}
+.dark .doc-md hr {
+  border-color: #1e293b;
+}
+.doc-md img {
+  max-width: 100%;
+}
+.doc-md input[type='checkbox'] {
+  margin-right: 0.4em;
+}

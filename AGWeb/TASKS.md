@@ -72,14 +72,14 @@ Derived from `AGWeb/PRD.md`. Phases are ordered by dependency; tasks within a ph
 
 Build our own thin viewer shell composed from open-source rendering primitives (all MIT/Apache 2.0) — no third-party app embedding.
 
-- [ ] 5.1 File-type detection + interception in the integrated browser: opening/navigating to `.md`, `.json`, `.yaml`, `.csv`, `.toml`, `.xml` renders the Document Studio view, with a toggle back to raw source (Monaco)
-- [ ] 5.2 Markdown renderer: react-markdown (remark/rehype pipeline) with GitHub-flavored markdown, `@uiw/react-markdown-preview`-style base CSS, dark/light modes
+- [x] 5.1 Doc-type files (`.md/.json/.yaml/.yml/.toml/.csv/.tsv`) open as Document Studio tabs in the browser tab strip with a Styled ⇄ Source (editable Monaco, ⌘S) toggle and Open-in-Editor; views live-refresh on disk changes — intercepting *navigated* URLs joins the Phase 2.5 proxy work
+- [x] 5.2 Markdown renderer: react-markdown + remark-gfm with GitHub-flavored styling (tables, task lists, blockquotes, code), light/dark
 - [ ] 5.3 Markdown extras: Shiki code-block highlighting, Mermaid diagram rendering, KaTeX math
-- [ ] 5.4 Sanitization pipeline (rehype-sanitize) so untrusted markdown/HTML cannot XSS the host app
-- [ ] 5.5 JSON tree inspector: collapsible tree with search, type badges, value previews, copy-as-path (`@uiw/react-json-view` or equivalent MIT component)
+- [x] 5.4 Sanitization pipeline (rehype-sanitize) so untrusted markdown/HTML cannot script in the host app
+- [x] 5.5 JSON tree inspector: collapsible tree with search (filters to matching subtrees), type badges (object/array counts), value previews, hover copy-as-path
 - [ ] 5.6 Interactive node-graph view for JSON/YAML/XML/CSV (evaluate embedding JSON Crack's Apache-2.0 graph engine vs. building on React Flow)
-- [ ] 5.7 CSV/TSV renderer: PapaParse ingestion → sortable, filterable styled table
-- [ ] 5.8 YAML/TOML support: parse (js-yaml / smol-toml) and route through the JSON tree + graph views
+- [x] 5.7 CSV/TSV renderer: PapaParse → sortable (numeric-aware), filterable table with sticky header
+- [x] 5.8 YAML/TOML support: js-yaml / smol-toml parse, routed through the JSON tree (graph view pending 5.6)
 - [ ] 5.9 Theming system: user-selectable document themes (typography, spacing, palette) applied live; custom themes savable per workspace
 - [ ] 5.10 Format conversion utilities: JSON ↔ YAML ↔ CSV ↔ XML
 - [ ] 5.11 Export styled views to standalone HTML, PDF, and image

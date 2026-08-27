@@ -19,11 +19,32 @@ export type Theme = 'light' | 'dark'
 /** A browser tab in the tab strip. Page state lives in `browserStates`. */
 export interface BrowserTab {
   id: string
+  /** 'web' hosts a Chromium view; 'doc' renders a Document Studio view. */
+  kind: 'web' | 'doc'
   title: string
   /** For tabs opened from a link: the URL to load on first mount. */
   initialUrl?: string
+  /** Document Studio tabs: the workspace-relative file being rendered. */
+  docPath?: string
   /** True once a WebContentsView exists for this tab (first navigation). */
   hasContent: boolean
+}
+
+/** File types the Document Studio renders as styled documents. */
+export const DOC_EXTENSIONS = new Set([
+  'md',
+  'markdown',
+  'json',
+  'yaml',
+  'yml',
+  'toml',
+  'csv',
+  'tsv'
+])
+
+export function isDocFile(path: string): boolean {
+  const ext = path.split('.').pop()?.toLowerCase() ?? ''
+  return DOC_EXTENSIONS.has(ext)
 }
 
 /** Where a dragged block or group is dropped. */
@@ -74,7 +95,17 @@ function makeGroup(zone: DeckZone, members: BlockInstance[]): BlockGroup {
 
 let nextTabId = 1
 function makeTab(initialUrl?: string): BrowserTab {
-  return { id: `tab-${nextTabId++}`, title: 'New Tab', initialUrl, hasContent: false }
+  return { id: `tab-${nextTabId++}`, kind: 'web', title: 'New Tab', initialUrl, hasContent: false }
+}
+
+function makeDocTab(docPath: string): BrowserTab {
+  return {
+    id: `tab-${nextTabId++}`,
+    kind: 'doc',
+    title: docPath.split('/').pop() ?? docPath,
+    docPath,
+    hasContent: false
+  }
 }
 
 interface DeckLayout {
@@ -190,6 +221,8 @@ interface ShellState {
   setTheme(theme: Theme): void
 
   newTab(initialUrl?: string): string
+  /** Open (or focus) a Document Studio tab for a workspace file. */
+  openDoc(path: string): void
   closeTab(id: string): void
   activateTab(id: string): void
   markTabHasContent(id: string): void
@@ -253,10 +286,18 @@ export const useShellStore = create<ShellState>((set) => ({
     return tab.id
   },
 
+  openDoc: (path) =>
+    set((state) => {
+      const existing = state.tabs.find((t) => t.kind === 'doc' && t.docPath === path)
+      if (existing) return { activeTabId: existing.id }
+      const tab = makeDocTab(path)
+      return { tabs: [...state.tabs, tab], activeTabId: tab.id }
+    }),
+
   closeTab: (id) =>
     set((state) => {
       const closing = state.tabs.find((t) => t.id === id)
-      if (closing?.hasContent) void window.agweb.browser.destroy(id)
+      if (closing?.kind === 'web' && closing.hasContent) void window.agweb.browser.destroy(id)
       const browserStates = { ...state.browserStates }
       delete browserStates[id]
 

@@ -58,3 +58,19 @@ export function languageForPath(path: string): string {
 }
 
 export { monaco }
+
+/** Get or create the shared document model for a workspace file. */
+export async function ensureModel(path: string): Promise<monaco.editor.ITextModel | null> {
+  const uri = monaco.Uri.from({ scheme: 'agweb', path: `/${path}` })
+  const existing = monaco.editor.getModel(uri)
+  if (existing) return existing
+  const result = await window.agweb.fs.read(path)
+  if (result.content === undefined) return null
+  const model = monaco.editor.createModel(result.content, languageForPath(path), uri)
+  model.onDidChangeContent(() => {
+    void import('@/store').then(({ useShellStore }) =>
+      useShellStore.getState().setFileDirty(path, true)
+    )
+  })
+  return model
+}
