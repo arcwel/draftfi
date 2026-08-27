@@ -1,0 +1,35 @@
+name: AGWeb CI
+
+on:
+  push:
+    branches: [main]
+    paths: ['AGWeb/**', '.github/workflows/agweb.yml']
+  pull_request:
+    paths: ['AGWeb/**', '.github/workflows/agweb.yml']
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: AGWeb/app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: AGWeb/app/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Smoke test (Electron under Xvfb)
+        run: xvfb-run -a node scripts/smoke.mjs smoke.png
+      - name: Upload smoke screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agweb-smoke
+          path: AGWeb/app/smoke.png
+          if-no-files-found: ignore

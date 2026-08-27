@@ -2,7 +2,7 @@
 
 Derived from `AGWeb/PRD.md`. Phases are ordered by dependency; tasks within a phase can often run in parallel.
 
-**Status:** Phase 1 complete. App scaffolded under `app/` (Electron + React + TS + Tailwind via electron-vite); shell builds clean (`npm run typecheck`, `npm run build`) and passes an automated Electron smoke test (`scripts/smoke.mjs`: launches app, opens tabs, toggles dock/theme, screenshots). Remaining Phase 0 items (ESLint/Prettier, CI, Python tooling) are tracked below. See `RESOURCES.md` for the full techniques/repos/resources inventory.
+**Status:** Phase 1 complete; Phase 2 core browser working. Integrated Chromium tabs (WebContentsView) with navigation chrome, per-tab process isolation, DevTools, default-deny permissions, and popup→new-tab handling are in and covered by the smoke test (navigates a page via the address bar and verifies the title round-trips into the tab strip). Lint (ESLint+Prettier) and CI (`.github/workflows/agweb.yml`: lint → typecheck → build → xvfb smoke) are in place. See `RESOURCES.md` for the full techniques/repos/resources inventory.
 
 ---
 
@@ -13,9 +13,9 @@ Derived from `AGWeb/PRD.md`. Phases are ordered by dependency; tasks within a ph
 - [x] 0.3 Scaffold Electron + TypeScript + React app (main process, preload, renderer) with Vite bundling — electron-vite under `app/`
 - [x] 0.4 Add Tailwind CSS and base design tokens for the Mission Control shell — Tailwind v4
 - [ ] 0.5 Integrate Monaco Editor as the embedded code editor component (moved to Phase 3 editor work)
-- [ ] 0.6 Set up Python tooling workspace (`backend/` or `tools/`) with venv, ruff, pytest for agent/proxy backend services
-- [ ] 0.7 Dev tooling: ESLint, Prettier, pre-commit hooks (TypeScript strict mode ✅)
-- [ ] 0.8 CI pipeline: lint + typecheck + unit tests on push
+- [ ] 0.6 Set up Python tooling workspace (`backend/` or `tools/`) with venv, ruff, pytest — deferred until the first Python service lands (Phase 6 agent runtime / Phase 2.5 proxy)
+- [x] 0.7 Dev tooling: ESLint (flat config + typescript-eslint + react-hooks), Prettier, TypeScript strict mode — `npm run lint` / `npm run format` (pre-commit hooks still open)
+- [x] 0.8 CI pipeline: `.github/workflows/agweb.yml` — lint, typecheck, build, and Electron smoke test under Xvfb on every AGWeb push/PR
 - [x] 0.9 Write `AGWeb/README.md` with vision, architecture overview, and dev setup steps
 
 ## Phase 1 — Application Shell & Window Management
@@ -29,13 +29,13 @@ Derived from `AGWeb/PRD.md`. Phases are ordered by dependency; tasks within a ph
 
 ## Phase 2 — Integrated Browser (Chromium)
 
-- [ ] 2.1 Embed Chromium browser tabs via Electron `WebContentsView` with standard navigation chrome (back/forward/reload/URL bar)
-- [ ] 2.2 Tab management: open/close/reorder, session restore, per-tab process isolation
-- [ ] 2.3 DevTools access per tab
+- [x] 2.1 Embed Chromium browser tabs via Electron `WebContentsView` with standard navigation chrome — back/forward/reload/stop, URL bar with search fallback, live title/loading state pushed over IPC (`src/main/browser.ts`, `BrowserPane.tsx`)
+- [ ] 2.2 Tab management: open/close ✅ (per-tab process isolation via sandboxed views in a dedicated `persist:agweb-browser` session); reorder and session restore still open
+- [x] 2.3 DevTools access per tab (detached window via toolbar button)
 - [ ] 2.4 Chrome extension loading support (Manifest V3 via Electron's extensions API; document limitations)
 - [ ] 2.5 Local proxy layer that strips frame-busting headers (X-Frame-Options, CSP frame-ancestors) for development-preview embedding only
 - [ ] 2.6 Proxy safety rails: enabled only for allowlisted dev origins, clear UI indicator when active
-- [ ] 2.7 Download handling, permission prompts (camera/mic/geolocation), and popup policy
+- [ ] 2.7 Download handling and permission prompt UI still open; web permissions currently default-deny, popups open as new shell tabs
 
 ## Phase 3 — IDE Core (Editor, Files, Terminal)
 

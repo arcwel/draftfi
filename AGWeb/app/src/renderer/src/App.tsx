@@ -19,6 +19,19 @@ export default function App(): React.JSX.Element {
     return window.agweb.onWorkspaceChanged(setWorkspace)
   }, [setWorkspace])
 
+  // Route embedded-browser events into the store: live navigation state, and
+  // pages requesting a new window become new shell tabs.
+  useEffect(() => {
+    const offState = window.agweb.browser.onState(useShellStore.getState().updateBrowserState)
+    const offOpen = window.agweb.browser.onOpenTab((url) => {
+      useShellStore.getState().openTab('browser', undefined, url)
+    })
+    return () => {
+      offState()
+      offOpen()
+    }
+  }, [])
+
   useShortcut(
     'mod+b',
     'Toggle sidebar',

@@ -26,6 +26,24 @@ export interface AppInfo {
   platform: NodeJS.Platform
 }
 
+/** Screen-space rectangle in device-independent pixels. */
+export interface Rect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/** Live navigation state of one embedded browser view, pushed to the renderer. */
+export interface BrowserTabState {
+  tabId: string
+  url: string
+  title: string
+  isLoading: boolean
+  canGoBack: boolean
+  canGoForward: boolean
+}
+
 /** Channels the renderer invokes (request/response). */
 export const IpcChannels = {
   appInfo: 'app:info',
@@ -33,12 +51,24 @@ export const IpcChannels = {
   workspaceOpenPath: 'workspace:open-path',
   workspaceCurrent: 'workspace:current',
   workspaceRecent: 'workspace:recent',
-  themeSet: 'theme:set'
+  themeSet: 'theme:set',
+  browserCreate: 'browser:create',
+  browserDestroy: 'browser:destroy',
+  browserNavigate: 'browser:navigate',
+  browserBack: 'browser:back',
+  browserForward: 'browser:forward',
+  browserReload: 'browser:reload',
+  browserStop: 'browser:stop',
+  browserSetBounds: 'browser:set-bounds',
+  browserSetVisible: 'browser:set-visible',
+  browserDevTools: 'browser:devtools'
 } as const
 
 /** Events pushed from main to the renderer. */
 export const IpcEvents = {
-  workspaceChanged: 'event:workspace-changed'
+  workspaceChanged: 'event:workspace-changed',
+  browserState: 'event:browser-state',
+  browserOpenTab: 'event:browser-open-tab'
 } as const
 
 /** The API surface exposed on `window.agweb` by the preload bridge. */
@@ -53,4 +83,22 @@ export interface AgwebApi {
   /** Keep Electron's nativeTheme in sync with the renderer's choice. */
   setTheme(source: ThemeSource): Promise<void>
   onWorkspaceChanged(listener: (workspace: WorkspaceInfo) => void): () => void
+
+  /** Embedded Chromium browser views, keyed by the renderer's tab id. */
+  browser: {
+    create(tabId: string): Promise<void>
+    destroy(tabId: string): Promise<void>
+    navigate(tabId: string, url: string): Promise<void>
+    back(tabId: string): Promise<void>
+    forward(tabId: string): Promise<void>
+    reload(tabId: string): Promise<void>
+    stop(tabId: string): Promise<void>
+    /** Position the view over the renderer's content area. */
+    setBounds(tabId: string, rect: Rect): Promise<void>
+    setVisible(tabId: string, visible: boolean): Promise<void>
+    openDevTools(tabId: string): Promise<void>
+    onState(listener: (state: BrowserTabState) => void): () => void
+    /** Fired when a page requests a new window (target=_blank etc.). */
+    onOpenTab(listener: (url: string) => void): () => void
+  }
 }

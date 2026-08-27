@@ -1,5 +1,6 @@
 import { useShellStore, type StageTab, type StageTabKind } from '@/store'
 import { WelcomeView } from '@/components/WelcomeView'
+import { BrowserPane } from '@/components/BrowserPane'
 
 const NEW_TAB_KINDS: { kind: StageTabKind; label: string }[] = [
   { kind: 'editor', label: '+ Editor' },
@@ -10,7 +11,6 @@ const NEW_TAB_KINDS: { kind: StageTabKind; label: string }[] = [
 function StagePlaceholder({ tab }: { tab: StageTab }): React.JSX.Element {
   const phase: Partial<Record<StageTabKind, string>> = {
     editor: 'Monaco editor integration lands in Phase 3.',
-    browser: 'Integrated Chromium tabs land in Phase 2.',
     slides: 'Reveal.js slide runtime lands in Phase 4.',
     'mission-control': 'Agent orchestration lands in Phase 6.'
   }
@@ -65,7 +65,11 @@ export function StageTabs(): React.JSX.Element {
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        {active.kind === 'welcome' ? <WelcomeView /> : <StagePlaceholder tab={active} />}
+        {active.kind === 'welcome' && <WelcomeView />}
+        {active.kind === 'browser' && <BrowserPane key={active.id} tabId={active.id} />}
+        {active.kind !== 'welcome' && active.kind !== 'browser' && (
+          <StagePlaceholder tab={active} />
+        )}
       </div>
     </div>
   )

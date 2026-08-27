@@ -54,7 +54,11 @@ export function listShortcuts(): Shortcut[] {
   return [...registry.values()].map((stack) => stack[stack.length - 1])
 }
 
-export function useShortcut(combo: string, description: string, handler: Shortcut['handler']): void {
+export function useShortcut(
+  combo: string,
+  description: string,
+  handler: Shortcut['handler']
+): void {
   useEffect(() => {
     return registerShortcut({ combo, description, handler })
   }, [combo, description, handler])

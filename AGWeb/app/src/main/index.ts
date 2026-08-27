@@ -10,6 +10,17 @@ import {
   openWorkspaceDialog,
   openWorkspacePath
 } from './workspace'
+import {
+  createBrowserTab,
+  destroyAllBrowserTabs,
+  destroyBrowserTab,
+  initBrowser,
+  navigate,
+  setBounds,
+  setVisible,
+  withTab
+} from './browser'
+import type { Rect } from '@shared/ipc'
 
 const MAX_RENDERER_RESTARTS = 3
 
@@ -77,9 +88,16 @@ function createMainWindow(): void {
     if (!url.startsWith('http://localhost')) event.preventDefault()
   })
 
+  // Tear down browser views on 'close' (window still alive) — on 'closed' the
+  // window object is destroyed and removeChildView would throw, hanging quit.
+  mainWindow.on('close', () => {
+    destroyAllBrowserTabs()
+  })
   mainWindow.on('closed', () => {
     mainWindow = null
   })
+
+  initBrowser(mainWindow)
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -119,6 +137,52 @@ function registerIpcHandlers(): void {
     if (source === 'system' || source === 'light' || source === 'dark') {
       nativeTheme.themeSource = source as ThemeSource
     }
+  })
+
+  const tabId = (value: unknown): string | null => (typeof value === 'string' ? value : null)
+
+  ipcMain.handle(IpcChannels.browserCreate, (_e, id: unknown) => {
+    const t = tabId(id)
+    if (t) createBrowserTab(t)
+  })
+  ipcMain.handle(IpcChannels.browserDestroy, (_e, id: unknown) => {
+    const t = tabId(id)
+    if (t) destroyBrowserTab(t)
+  })
+  ipcMain.handle(IpcChannels.browserNavigate, (_e, id: unknown, url: unknown) => {
+    const t = tabId(id)
+    if (t && typeof url === 'string' && /^(https?|data|about|file):/i.test(url)) navigate(t, url)
+  })
+  ipcMain.handle(IpcChannels.browserBack, (_e, id: unknown) => {
+    const t = tabId(id)
+    if (t) withTab(t, (v) => v.webContents.navigationHistory.goBack())
+  })
+  ipcMain.handle(IpcChannels.browserForward, (_e, id: unknown) => {
+    const t = tabId(id)
+    if (t) withTab(t, (v) => v.webContents.navigationHistory.goForward())
+  })
+  ipcMain.handle(IpcChannels.browserReload, (_e, id: unknown) => {
+    const t = tabId(id)
+    if (t) withTab(t, (v) => v.webContents.reload())
+  })
+  ipcMain.handle(IpcChannels.browserStop, (_e, id: unknown) => {
+    const t = tabId(id)
+    if (t) withTab(t, (v) => v.webContents.stop())
+  })
+  ipcMain.handle(IpcChannels.browserSetBounds, (_e, id: unknown, rect: unknown) => {
+    const t = tabId(id)
+    const r = rect as Rect
+    if (t && r && [r.x, r.y, r.width, r.height].every((n) => Number.isFinite(n))) {
+      setBounds(t, r)
+    }
+  })
+  ipcMain.handle(IpcChannels.browserSetVisible, (_e, id: unknown, visible: unknown) => {
+    const t = tabId(id)
+    if (t) setVisible(t, visible === true)
+  })
+  ipcMain.handle(IpcChannels.browserDevTools, (_e, id: unknown) => {
+    const t = tabId(id)
+    if (t) withTab(t, (v) => v.webContents.openDevTools({ mode: 'detach' }))
   })
 }
 

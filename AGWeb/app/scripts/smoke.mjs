@@ -15,12 +15,19 @@ try {
   const title = await window.title()
   if (title !== 'AGWeb') throw new Error(`Unexpected window title: ${title}`)
 
-  // Exercise the shell: open a tab, toggle the dock, toggle theme.
+  // Exercise the shell: open a browser tab, toggle the dock, toggle theme.
   await window.click('text=+ Browser')
-  await window.waitForSelector('text=Integrated Chromium tabs land in Phase 2.')
+  await window.waitForSelector('input[placeholder="Enter URL or search…"]')
   await window.keyboard.press('ControlOrMeta+j')
   await window.waitForSelector('text=node-pty')
   await window.keyboard.press('ControlOrMeta+Shift+l')
+
+  // Exercise the embedded Chromium view end-to-end: navigate via the address
+  // bar and wait for the page title to round-trip main → renderer → tab strip.
+  const dataUrl = 'data:text/html,<title>Smoke Page</title><h1>ok</h1>'
+  await window.fill('input[placeholder="Enter URL or search…"]', dataUrl)
+  await window.press('input[placeholder="Enter URL or search…"]', 'Enter')
+  await window.waitForSelector('text=Smoke Page', { timeout: 15000 })
 
   await window.screenshot({ path: screenshotPath })
   console.log(`smoke OK — screenshot: ${screenshotPath}`)
