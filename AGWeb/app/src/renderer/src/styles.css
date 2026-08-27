@@ -20,3 +20,73 @@ body,
     Roboto,
     sans-serif;
 }
+
+/* ---- Dev Deck: Stage reveal choreography (see AGWeb/DESIGN.md) ---- */
+
+.workspace {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* The stage is the browser viewport. Browsing: full bleed. Deck: spotlit frame. */
+.stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 0;
+  transition:
+    inset 0.55s cubic-bezier(0.32, 0.72, 0, 1),
+    border-radius 0.55s cubic-bezier(0.32, 0.72, 0, 1),
+    border-color 0.55s ease,
+    box-shadow 0.55s ease;
+}
+.workspace.revealed .stage {
+  inset: 12px 460px 272px 12px;
+  border-radius: 10px;
+  border-color: #cbd5e1;
+  box-shadow:
+    0 0 0 1px rgba(2, 132, 199, 0.22),
+    0 18px 40px rgba(15, 23, 42, 0.25);
+}
+.dark .workspace.revealed .stage {
+  border-color: #1e293b;
+  box-shadow:
+    0 0 0 1px rgba(56, 189, 248, 0.22),
+    0 18px 40px rgba(0, 0, 0, 0.45);
+}
+
+/* Right column of blocks: slides in just after the stage starts moving. */
+.deck-col {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  bottom: 272px;
+  width: 436px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transform: translateX(calc(100% + 24px));
+  transition: transform 0.55s cubic-bezier(0.32, 0.72, 0, 1) 0.07s;
+}
+.workspace.revealed .deck-col {
+  transform: translateX(0);
+}
+
+/* Bottom dock: rises from below, last. */
+.deck-dock {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  height: 248px;
+  display: flex;
+  gap: 12px;
+  transform: translateY(calc(100% + 24px));
+  transition: transform 0.55s cubic-bezier(0.32, 0.72, 0, 1) 0.14s;
+}
+.workspace.revealed .deck-dock {
+  transform: translateY(0);
+}

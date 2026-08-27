@@ -61,6 +61,7 @@ export const IpcChannels = {
   browserStop: 'browser:stop',
   browserSetBounds: 'browser:set-bounds',
   browserSetVisible: 'browser:set-visible',
+  browserSetCornerRadius: 'browser:set-corner-radius',
   browserDevTools: 'browser:devtools'
 } as const
 
@@ -96,6 +97,8 @@ export interface AgwebApi {
     /** Position the view over the renderer's content area. */
     setBounds(tabId: string, rect: Rect): Promise<void>
     setVisible(tabId: string, visible: boolean): Promise<void>
+    /** Round the native view's corners to match the stage frame (0 = square). */
+    setCornerRadius(tabId: string, radius: number): Promise<void>
     openDevTools(tabId: string): Promise<void>
     onState(listener: (state: BrowserTabState) => void): () => void
     /** Fired when a page requests a new window (target=_blank etc.). */

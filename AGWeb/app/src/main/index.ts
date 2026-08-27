@@ -17,6 +17,7 @@ import {
   initBrowser,
   navigate,
   setBounds,
+  setCornerRadius,
   setVisible,
   withTab
 } from './browser'
@@ -179,6 +180,10 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IpcChannels.browserSetVisible, (_e, id: unknown, visible: unknown) => {
     const t = tabId(id)
     if (t) setVisible(t, visible === true)
+  })
+  ipcMain.handle(IpcChannels.browserSetCornerRadius, (_e, id: unknown, radius: unknown) => {
+    const t = tabId(id)
+    if (t && typeof radius === 'number' && Number.isFinite(radius)) setCornerRadius(t, radius)
   })
   ipcMain.handle(IpcChannels.browserDevTools, (_e, id: unknown) => {
     const t = tabId(id)

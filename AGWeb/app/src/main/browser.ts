@@ -105,6 +105,14 @@ export function setVisible(tabId: string, visible: boolean): void {
   withTab(tabId, (view) => view.setVisible(visible))
 }
 
+export function setCornerRadius(tabId: string, radius: number): void {
+  withTab(tabId, (view) => {
+    // View.setBorderRadius is not in all Electron typings yet — call defensively.
+    const v = view as unknown as { setBorderRadius?: (r: number) => void }
+    v.setBorderRadius?.(Math.max(0, Math.round(radius)))
+  })
+}
+
 export function destroyAllBrowserTabs(): void {
   for (const tabId of [...views.keys()]) destroyBrowserTab(tabId)
 }

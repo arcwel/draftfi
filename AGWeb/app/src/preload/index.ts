@@ -29,6 +29,8 @@ const api: AgwebApi = {
     setBounds: (tabId, rect) => ipcRenderer.invoke(IpcChannels.browserSetBounds, tabId, rect),
     setVisible: (tabId, visible) =>
       ipcRenderer.invoke(IpcChannels.browserSetVisible, tabId, visible),
+    setCornerRadius: (tabId, radius) =>
+      ipcRenderer.invoke(IpcChannels.browserSetCornerRadius, tabId, radius),
     openDevTools: (tabId) => ipcRenderer.invoke(IpcChannels.browserDevTools, tabId),
     onState: (listener) => {
       const handler = (_event: unknown, state: BrowserTabState): void => listener(state)

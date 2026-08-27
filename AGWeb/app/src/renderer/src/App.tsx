@@ -1,14 +1,15 @@
 import { useCallback, useEffect } from 'react'
-import { Sidebar } from '@/components/Sidebar'
-import { StageTabs } from '@/components/StageTabs'
-import { BottomDock } from '@/components/BottomDock'
-import { StatusBar } from '@/components/StatusBar'
+import { TabStrip } from '@/components/TabStrip'
+import { Toolbar } from '@/components/Toolbar'
+import { Stage } from '@/components/Stage'
+import { Deck } from '@/components/Deck'
 import { useShellStore } from '@/store'
 import { useThemeEffect } from '@/theme'
 import { useShortcut } from '@/shortcuts'
 
 export default function App(): React.JSX.Element {
-  const { sidebarOpen, dockOpen, toggleSidebar, toggleDock, openTab, closeTab } = useShellStore()
+  const deckRevealed = useShellStore((s) => s.deckRevealed)
+  const { toggleDeck, newTab, closeTab } = useShellStore()
   const setWorkspace = useShellStore((s) => s.setWorkspace)
   const setTheme = useShellStore((s) => s.setTheme)
 
@@ -20,11 +21,11 @@ export default function App(): React.JSX.Element {
   }, [setWorkspace])
 
   // Route embedded-browser events into the store: live navigation state, and
-  // pages requesting a new window become new shell tabs.
+  // pages requesting a new window become new browser tabs.
   useEffect(() => {
     const offState = window.agweb.browser.onState(useShellStore.getState().updateBrowserState)
     const offOpen = window.agweb.browser.onOpenTab((url) => {
-      useShellStore.getState().openTab('browser', undefined, url)
+      useShellStore.getState().newTab(url)
     })
     return () => {
       offState()
@@ -33,19 +34,14 @@ export default function App(): React.JSX.Element {
   }, [])
 
   useShortcut(
-    'mod+b',
-    'Toggle sidebar',
-    useCallback(() => toggleSidebar(), [toggleSidebar])
-  )
-  useShortcut(
-    'mod+j',
-    'Toggle bottom dock',
-    useCallback(() => toggleDock(), [toggleDock])
+    'mod+d',
+    'Reveal / hide the Dev Deck',
+    useCallback(() => toggleDeck(), [toggleDeck])
   )
   useShortcut(
     'mod+t',
     'New browser tab',
-    useCallback(() => openTab('browser'), [openTab])
+    useCallback(() => newTab(), [newTab])
   )
   useShortcut(
     'mod+w',
@@ -61,15 +57,13 @@ export default function App(): React.JSX.Element {
   )
 
   return (
-    <div className="flex h-full flex-col bg-slate-50 text-slate-900 dark:bg-[#0b0f14] dark:text-slate-100">
-      <div className="flex min-h-0 flex-1">
-        {sidebarOpen && <Sidebar />}
-        <div className="flex min-w-0 flex-1 flex-col">
-          <StageTabs />
-          {dockOpen && <BottomDock />}
-        </div>
+    <div className="flex h-full flex-col bg-slate-100 text-slate-900 dark:bg-[#0b0f14] dark:text-slate-100">
+      <TabStrip />
+      <Toolbar />
+      <div className={`workspace ${deckRevealed ? 'revealed' : ''}`}>
+        <Stage />
+        <Deck />
       </div>
-      <StatusBar />
     </div>
   )
 }
