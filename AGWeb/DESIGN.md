@@ -25,11 +25,18 @@ Header: drag grip · identity + context (file / shell / agent) · float/re-dock 
 Block states:
 
 - **Docked** — snapped into the right column or bottom dock; shares space with neighbors.
+- **Tabbed stack** — drop a block onto another to merge them into one tabbed group (DevTools-style). Tabs drag out to split again; `+` in the strip opens another instance into the group.
 - **Floating** — glass panel over the page; free position/size, always on top.
 - **On the rail** — collapsed to an icon on the window edge; one click restores it exactly where it was.
 - **Closed** — reopen from the Deck menu.
 
+**Multiple instances:** any block type can be opened more than once (Terminal 1, Terminal 2, a second Editor…). Instances are peers — each independently dockable, stackable, floatable.
+
 **Presets:** Browsing (deck hidden) · Building (stage + editor/terminal) · Debugging (stage + terminal/logs/agents). One keystroke swaps the whole layout. Layouts and presets persist per project.
+
+## Detached mode — the IDE as its own window
+
+A pop-out control beside the Deck button **detaches the entire deck into a separate OS window**: files, tabbed editors, stacked terminals, agents — all dev items contained in that one window, laid out like a standard IDE. The browser window simultaneously returns to pure browsing (its Deck button shows a "Deck detached" state). Two apps, two monitors if you like. "Dock back" in the IDE window's titlebar re-merges everything into the single-window Stage layout, restoring each block where it was. Blocks never split across more than these two hosts: attached (inside the browser window) or detached (all together in the IDE window).
 
 ## Visual language
 
@@ -38,5 +45,6 @@ Matches the existing shell: `#0b0f14` app ground, `#0e1420` panels, `#1e293b` bo
 ## Implementation notes
 
 - The stage is the existing `WebContentsView`. During the reveal, the renderer animates the stage placeholder with CSS while the existing ResizeObserver → `setBounds` pipe streams bounds to the native view each frame; if IPC jitter shows, fall back to hiding the view behind a captured snapshot for the 550 ms flight and snapping bounds at the end.
-- Deck state machine lives in the shell store: `deck: hidden | revealed`, per-block `{ zone: right | bottom | floating | rail | closed, order, size, floatRect }`, persisted per project.
+- Deck state machine lives in the shell store: `deck: hidden | revealed | detached`, block *instances* as `{ id, type, zone: right | bottom | floating | rail | closed, groupId, order, size, floatRect }` — a tabbed stack is simply instances sharing a `groupId` with one active tab. Persisted per project.
+- Detached mode is a second `BrowserWindow` rendering the same shell store (state synced over IPC or a shared main-process store); heavy block backends (pty sessions, editor models, agent processes) already live in the main process, so blocks re-render in the other window without losing state.
 - Blocks are the unit of extension: agent-generated panels (execution reports, diffs) arrive as blocks later.

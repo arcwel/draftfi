@@ -46,6 +46,9 @@ Derived from `AGWeb/PRD.md`. Phases are ordered by dependency; tasks within a ph
 - [ ] 2B.5 Rail: collapse blocks to an icon strip on the window edge; restore in place
 - [ ] 2B.6 Layout presets (Browsing / Building / Debugging) + per-project layout persistence
 - [ ] 2B.7 Floating glass block rendering (translucent, blurred) over the page
+- [ ] 2B.8 Tabbed stacks: drop a block onto another to merge into a tabbed group; drag tabs out to split; `+` opens a new instance into the group
+- [ ] 2B.9 Multiple instances per block type (Terminal 1/2, second Editor); instance lifecycle + naming
+- [ ] 2B.10 Detached mode: pop the whole deck out as a standalone IDE window (second BrowserWindow sharing the main-process store); browser reverts to pure browsing; "Dock back" re-merges with layout restored
 
 ## Phase 3 — IDE Core (Editor, Files, Terminal)
 
