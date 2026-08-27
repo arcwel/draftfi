@@ -37,6 +37,16 @@ Derived from `AGWeb/PRD.md`. Phases are ordered by dependency; tasks within a ph
 - [ ] 2.6 Proxy safety rails: enabled only for allowlisted dev origins, clear UI indicator when active
 - [ ] 2.7 Download handling and permission prompt UI still open; web permissions currently default-deny, popups open as new shell tabs
 
+## Phase 2B — Browser-First Shell & Dev Deck (see `DESIGN.md`)
+
+- [ ] 2B.1 Browser-only default mode: pure browser chrome (tabs + toolbar + Deck button), no dev UI visible
+- [ ] 2B.2 Deck reveal/hide animation (`⌘D`): stage retreat + staggered block entrance per the DESIGN.md spec, with the WebContentsView bounds streamed each frame (snapshot fallback if IPC jitters)
+- [ ] 2B.3 Block system: every dev feature as an independent block with header (grip, identity, float/dock, rail, close) and edge resize
+- [ ] 2B.4 Drag-and-drop rearrangement between right column, bottom dock, and floating; drop-zone highlighting
+- [ ] 2B.5 Rail: collapse blocks to an icon strip on the window edge; restore in place
+- [ ] 2B.6 Layout presets (Browsing / Building / Debugging) + per-project layout persistence
+- [ ] 2B.7 Floating glass block rendering (translucent, blurred) over the page
+
 ## Phase 3 — IDE Core (Editor, Files, Terminal)
 
 - [ ] 3.1 File explorer with create/rename/delete/move and file-watcher refresh
