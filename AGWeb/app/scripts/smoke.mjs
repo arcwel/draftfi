@@ -50,7 +50,10 @@ const app = await electron.launch({
   env: {
     ...process.env,
     AGWEB_WORKSPACE: workspace,
-    AGWEB_USER_DATA: mkdtempSync(join(tmpdir(), 'agweb-data-'))
+    AGWEB_USER_DATA: mkdtempSync(join(tmpdir(), 'agweb-data-')),
+    // Deterministic offline agent provider: same plan/approve/execute flow,
+    // no API key or network.
+    AGWEB_AGENT_MOCK: '1'
   }
 })
 
@@ -122,6 +125,24 @@ try {
   await window.press('input[placeholder="Search project…"]', 'Enter')
   await window.waitForSelector('text=src/index.ts', { timeout: 15000 })
 
+  // Agent orchestration (mock provider): plan → approve → execute, with the
+  // written file landing on disk and the session finishing as Done.
+  await window.fill('[data-testid="agent-task-input"]', 'Record this smoke task')
+  await window.click('[data-testid="agent-plan-button"]')
+  await window.waitForSelector('[data-testid="agent-status"]:has-text("Awaiting approval")', {
+    timeout: 15000
+  })
+  await window.waitForSelector('text=Write AGENT_NOTE.md')
+  await window.click('[data-testid="agent-approve"]')
+  await window.waitForSelector('[data-testid="agent-status"]:has-text("Done")', { timeout: 15000 })
+  await window.waitForSelector('text=Task complete.')
+  await waitFor(
+    () => readFileSync(join(workspace, 'AGENT_NOTE.md'), 'utf8').includes('Record this smoke task'),
+    10000,
+    'agent-written file did not reach disk'
+  )
+  await window.screenshot({ path: screenshotPath.replace(/\.png$/, '-agents.png') })
+
   // Document Studio: markdown renders styled in a doc tab (with highlighted
   // code, KaTeX math, and a Mermaid diagram); Source toggles to Monaco;
   // JSON gets the tree inspector; CSV gets the sortable table.
@@ -167,6 +188,11 @@ try {
   await window.click('button:has-text("Layout")')
   await window.click('button:has-text("Debugging")')
   await window.waitForSelector('button:has-text("Logs")')
+
+  // The Logs block carries the merged agent activity feed.
+  await window.waitForSelector('[data-testid="logs-feed"] >> text=Task complete.', {
+    timeout: 10000
+  })
 
   // Drag-and-drop: stack the Logs tab onto the Agents group header.
   const agentsHeader = window

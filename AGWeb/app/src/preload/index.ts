@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IpcChannels, IpcEvents } from '@shared/ipc'
 import type { AgwebApi, BrowserTabState, WorkspaceInfo } from '@shared/ipc'
 import type { DeckSyncState } from '@shared/deck'
+import type { AgentSessionInfo } from '@shared/agents'
 
 /**
  * The only bridge between the sandboxed renderer and the main process.
@@ -85,6 +86,20 @@ const api: AgwebApi = {
     html: (html, name) => ipcRenderer.invoke(IpcChannels.exportHtml, html, name),
     pdf: (html, name) => ipcRenderer.invoke(IpcChannels.exportPdf, html, name),
     capture: (rect, name) => ipcRenderer.invoke(IpcChannels.exportCapture, rect, name)
+  },
+  agents: {
+    start: (task) => ipcRenderer.invoke(IpcChannels.agentStart, task),
+    approve: (id) => ipcRenderer.invoke(IpcChannels.agentApprove, id),
+    reject: (id) => ipcRenderer.invoke(IpcChannels.agentReject, id),
+    stop: (id) => ipcRenderer.invoke(IpcChannels.agentStop, id),
+    list: () => ipcRenderer.invoke(IpcChannels.agentList),
+    keyStatus: () => ipcRenderer.invoke(IpcChannels.agentKeyStatus),
+    setKey: (key) => ipcRenderer.invoke(IpcChannels.agentSetKey, key),
+    onUpdate: (listener) => {
+      const handler = (_event: unknown, session: AgentSessionInfo): void => listener(session)
+      ipcRenderer.on(IpcEvents.agentUpdate, handler)
+      return () => ipcRenderer.removeListener(IpcEvents.agentUpdate, handler)
+    }
   },
   terminal: {
     create: (id, cols, rows) => ipcRenderer.invoke(IpcChannels.termCreate, id, cols, rows),

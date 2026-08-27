@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { BrowserTabState, WorkspaceInfo } from '@shared/ipc'
+import type { AgentSessionInfo } from '@shared/agents'
 import type {
   BlockGroup,
   BlockInstance,
@@ -218,6 +219,11 @@ interface ShellState {
   activeEditorPath: string | null
   dirtyFiles: Record<string, boolean>
 
+  /** Agent sessions, pushed from main (every window gets agentUpdate events). */
+  agentSessions: Record<string, AgentSessionInfo>
+  upsertAgentSession(session: AgentSessionInfo): void
+  setAgentSessions(sessions: AgentSessionInfo[]): void
+
   setWorkspace(workspace: WorkspaceInfo | null): void
   setTheme(theme: Theme): void
 
@@ -276,6 +282,13 @@ export const useShellStore = create<ShellState>((set) => ({
   editorTabs: [],
   activeEditorPath: null,
   dirtyFiles: {},
+  agentSessions: {},
+
+  upsertAgentSession: (session) =>
+    set((state) => ({ agentSessions: { ...state.agentSessions, [session.id]: session } })),
+
+  setAgentSessions: (sessions) =>
+    set({ agentSessions: Object.fromEntries(sessions.map((s) => [s.id, s])) }),
 
   setWorkspace: (workspace) =>
     set((state) => {

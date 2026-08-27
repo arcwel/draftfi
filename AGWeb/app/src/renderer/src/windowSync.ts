@@ -27,6 +27,13 @@ export function useShellSync(roleKind: 'main' | 'deck' | 'float'): void {
     void window.agweb.getCurrentWorkspace().then(setWorkspace)
     return window.agweb.onWorkspaceChanged(setWorkspace)
   }, [])
+
+  // Agent sessions live in main; every window mirrors them (Agents + Logs).
+  useEffect(() => {
+    const { setAgentSessions, upsertAgentSession } = useShellStore.getState()
+    void window.agweb.agents.list().then(setAgentSessions)
+    return window.agweb.agents.onUpdate(upsertAgentSession)
+  }, [])
 }
 
 /** Main window only: keep the deck window and float windows matching state. */

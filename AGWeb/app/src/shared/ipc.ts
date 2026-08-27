@@ -83,7 +83,14 @@ export const IpcChannels = {
   searchQuery: 'search:query',
   exportHtml: 'export:html',
   exportPdf: 'export:pdf',
-  exportCapture: 'export:capture'
+  exportCapture: 'export:capture',
+  agentStart: 'agent:start',
+  agentApprove: 'agent:approve',
+  agentReject: 'agent:reject',
+  agentStop: 'agent:stop',
+  agentList: 'agent:list',
+  agentKeyStatus: 'agent:key-status',
+  agentSetKey: 'agent:set-key'
 } as const
 
 /** One project-search match. */
@@ -103,7 +110,8 @@ export const IpcEvents = {
   deckWindowClosed: 'event:deck-window-closed',
   fsChanged: 'event:fs-changed',
   termData: 'event:term-data',
-  termExit: 'event:term-exit'
+  termExit: 'event:term-exit',
+  agentUpdate: 'event:agent-update'
 } as const
 
 export interface FsEntry {
@@ -183,6 +191,20 @@ export interface AgwebApi {
     pdf(html: string, suggestedName: string): Promise<{ path?: string; error?: string }>
     /** Capture a region of this window (the stage) as a PNG. */
     capture(rect: Rect, suggestedName: string): Promise<{ path?: string; error?: string }>
+  }
+
+  /** Claude-powered agent sessions: plan → approve → execute in the workspace. */
+  agents: {
+    /** Start planning a task; resolves to the new session id. */
+    start(task: string): Promise<string>
+    approve(id: string): Promise<void>
+    reject(id: string): Promise<void>
+    stop(id: string): Promise<void>
+    list(): Promise<import('./agents').AgentSessionInfo[]>
+    keyStatus(): Promise<import('./agents').AgentKeyStatus>
+    setKey(key: string): Promise<import('./agents').AgentKeyStatus>
+    /** Fired whenever any session's plan, log, or status changes. */
+    onUpdate(listener: (session: import('./agents').AgentSessionInfo) => void): () => void
   }
 
   /** Terminal sessions, keyed by block id; they outlive renderer mounts. */

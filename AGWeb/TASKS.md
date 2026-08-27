@@ -87,13 +87,13 @@ Build our own thin viewer shell composed from open-source rendering primitives (
 
 ## Phase 6 — Agent Orchestration (Mission Control)
 
-- [ ] 6.1 Agent runtime abstraction: spawn/monitor/terminate agent processes tied to project directories
-- [ ] 6.2 Mission Control UI: agent roster, live status, activity feed per agent
-- [ ] 6.3 Structured plan generation: agent proposes a step-by-step task list (file edits, commands, tests) as a typed schema
-- [ ] 6.4 Plan review/approval flow: user validates or edits the plan before any filesystem or terminal execution
-- [ ] 6.5 Execution engine: apply file edits, run terminal commands, stream logs to Mission Control
-- [ ] 6.6 Multi-agent concurrency: isolation between agents in different project directories, conflict detection on shared paths
-- [ ] 6.7 Task/plan persistence and resumability across app restarts
+- [x] 6.1 Agent runtime abstraction: sessions spawned/monitored/stopped in the main process, bound to the open workspace (`src/main/agent.ts`; Claude `claude-opus-5`, mock provider via `AGWEB_AGENT_MOCK=1` for offline testing)
+- [x] 6.2 Mission Control UI: session roster with live status badges, per-session activity feed, per-edit before/after diff viewer (Agents block); merged live feed across sessions (Logs block)
+- [x] 6.3 Structured plan generation: forced `create_plan` tool call with a strict typed schema (step kind/title/detail)
+- [x] 6.4 Plan review/approval flow: plans held in `awaiting_approval` until Approve & run / Reject — no filesystem or terminal execution before approval (plan editing still open)
+- [x] 6.5 Execution engine: manual tool-use loop over workspace-scoped tools (read/write/list/search/run_command), every action streamed to Mission Control; refusal + pause_turn handling, stop button
+- [ ] 6.6 Multi-agent concurrency: several sessions can run at once ✅; per-directory isolation and conflict detection on shared paths still open
+- [x] 6.7 Task/plan persistence across app restarts (atomic JSON store; sessions interrupted mid-run are marked as errored on boot — mid-run resume still open)
 
 ## Phase 7 — Autonomous Browser Control & Verification
 

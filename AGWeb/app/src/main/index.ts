@@ -50,6 +50,16 @@ import {
 } from './terminal'
 import { searchWorkspace } from './search'
 import { exportCapture, exportHtml, exportPdf } from './export'
+import {
+  approveAgentPlan,
+  getAgentKeyStatus,
+  initAgents,
+  listAgentSessions,
+  rejectAgentPlan,
+  setAgentApiKey,
+  startAgentTask,
+  stopAgent
+} from './agent'
 import type { WorkspaceInfo } from '@shared/ipc'
 
 // Test/dev hooks: isolate state and open a workspace without the dialog.
@@ -333,10 +343,35 @@ function registerIpcHandlers(): void {
     }
     return exportCapture(owner(event), r, str(name) ?? 'document.png')
   })
+
+  ipcMain.handle(IpcChannels.agentStart, (_e, task: unknown) => {
+    const t = str(task)?.trim()
+    if (!t) throw new Error('empty task')
+    return startAgentTask(t)
+  })
+  ipcMain.handle(IpcChannels.agentApprove, (_e, id: unknown) => {
+    const s = str(id)
+    if (s) approveAgentPlan(s)
+  })
+  ipcMain.handle(IpcChannels.agentReject, (_e, id: unknown) => {
+    const s = str(id)
+    if (s) rejectAgentPlan(s)
+  })
+  ipcMain.handle(IpcChannels.agentStop, (_e, id: unknown) => {
+    const s = str(id)
+    if (s) stopAgent(s)
+  })
+  ipcMain.handle(IpcChannels.agentList, () => listAgentSessions())
+  ipcMain.handle(IpcChannels.agentKeyStatus, () => getAgentKeyStatus())
+  ipcMain.handle(IpcChannels.agentSetKey, (_e, key: unknown) => {
+    setAgentApiKey(str(key) ?? '')
+    return getAgentKeyStatus()
+  })
 }
 
 app.whenReady().then(() => {
   registerIpcHandlers()
+  initAgents()
 
   if (process.env.AGWEB_WORKSPACE) {
     const workspace = openWorkspacePath(process.env.AGWEB_WORKSPACE)
