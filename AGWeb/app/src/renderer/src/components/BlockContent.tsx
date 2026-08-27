@@ -2,6 +2,7 @@ import type { BlockInstance } from '@/store'
 import { EditorBlock } from '@/components/EditorBlock'
 import { TerminalBlock } from '@/components/TerminalBlock'
 import { FilesTree } from '@/components/FilesTree'
+import { SearchBlock } from '@/components/SearchBlock'
 
 /** Content for each block type. Agents/Logs fill in with Phase 6. */
 export function BlockContent({ block }: { block: BlockInstance }): React.JSX.Element {
@@ -12,6 +13,8 @@ export function BlockContent({ block }: { block: BlockInstance }): React.JSX.Ele
       return <TerminalBlock id={block.id} />
     case 'editor':
       return <EditorBlock />
+    case 'search':
+      return <SearchBlock />
     case 'agents':
       return (
         <div className="flex h-full flex-col items-start gap-2.5 p-3 text-xs text-slate-500">

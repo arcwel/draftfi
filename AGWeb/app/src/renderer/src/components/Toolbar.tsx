@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useShellStore, type DeckPreset } from '@/store'
+import { BLOCK_LABELS, useShellStore, type BlockType, type DeckPreset } from '@/store'
 import {
   BackIcon,
   CloseIcon,
@@ -46,9 +46,11 @@ export function Toolbar(): React.JSX.Element {
   const toggleDeck = useShellStore((s) => s.toggleDeck)
   const detachDeck = useShellStore((s) => s.detachDeck)
   const applyPreset = useShellStore((s) => s.applyPreset)
+  const addBlock = useShellStore((s) => s.addBlock)
   const [urlInput, setUrlInput] = useState('')
   const [editing, setEditing] = useState(false)
   const [presetsOpen, setPresetsOpen] = useState(false)
+  const [blocksOpen, setBlocksOpen] = useState(false)
 
   const liveUrl = state?.url && state.url !== 'about:blank' ? state.url : ''
   const displayedUrl = editing ? urlInput : liveUrl
@@ -156,6 +158,32 @@ export function Toolbar(): React.JSX.Element {
           <PopOutIcon />
         </button>
       )}
+
+      <div className="relative">
+        <button
+          onClick={() => setBlocksOpen((o) => !o)}
+          className="flex h-8 items-center rounded-lg border border-slate-300 px-2.5 text-xs font-semibold text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+          aria-label="Add block"
+        >
+          + Block
+        </button>
+        {blocksOpen && (
+          <div className="absolute right-0 top-9 z-50 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-[#0e1420]">
+            {(Object.keys(BLOCK_LABELS) as BlockType[]).map((type) => (
+              <button
+                key={type}
+                onClick={() => {
+                  addBlock(type)
+                  setBlocksOpen(false)
+                }}
+                className="block w-full px-3.5 py-2 text-left text-xs font-medium hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                {BLOCK_LABELS[type]}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="relative">
         <button

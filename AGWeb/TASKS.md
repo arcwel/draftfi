@@ -54,10 +54,10 @@ Derived from `AGWeb/PRD.md`. Phases are ordered by dependency; tasks within a ph
 
 - [x] 3.1 File explorer: lazy tree of the workspace with create/rename (inline)/delete (confirmed) and recursive-watcher refresh; workspace-scoped path validation in main — move-via-drag still open
 - [x] 3.2 Monaco integration: bundled workers (JSON/CSS/HTML/TS IntelliSense), syntax highlighting incl. Python/Markdown/YAML, shared document models, tabbed open files synced across windows, dirty markers, ⌘S save-to-disk
-- [ ] 3.3 Formatter integration (Prettier for web languages, ruff/black for Python)
+- [x] 3.3 Formatter integration: Prettier (lazy-loaded) for JS/TS/JSON/CSS/HTML/Markdown/YAML via the editor's Format button / ⇧⌥F — ruff/black join the Python tooling workspace (0.6)
 - [x] 3.4 Integrated terminal: node-pty sessions in main (in-process when rebuilt for Electron, system-node pty-host fallback otherwise) + xterm.js frontend; sessions keyed by block id survive deck hide/move/detach with scrollback replay; multiple sessions via `+`
-- [ ] 3.5 Diff viewer for reviewing agent-proposed changes before/after apply
-- [ ] 3.6 Search across project (ripgrep-backed)
+- [x] 3.5 Diff viewer: Monaco side-by-side diff overlay in the editor (saved-on-disk vs live buffer) — the same component agents' proposed-change review will reuse
+- [x] 3.6 Search across project: ripgrep-backed (JSON stream, gitignore-aware) with a pure-Node fallback; Search block added via the toolbar's + Block menu, hits jump to file+line in the editor
 
 ## Phase 4 — Live Preview & Slide Runtime
 
@@ -74,16 +74,16 @@ Build our own thin viewer shell composed from open-source rendering primitives (
 
 - [x] 5.1 Doc-type files (`.md/.json/.yaml/.yml/.toml/.csv/.tsv`) open as Document Studio tabs in the browser tab strip with a Styled ⇄ Source (editable Monaco, ⌘S) toggle and Open-in-Editor; views live-refresh on disk changes — intercepting *navigated* URLs joins the Phase 2.5 proxy work
 - [x] 5.2 Markdown renderer: react-markdown + remark-gfm with GitHub-flavored styling (tables, task lists, blockquotes, code), light/dark
-- [ ] 5.3 Markdown extras: Shiki code-block highlighting, Mermaid diagram rendering, KaTeX math
+- [x] 5.3 Markdown extras: code-block highlighting (highlight.js via rehype-highlight; Shiki noted as an upgrade path), Mermaid diagrams (lazy-loaded, securityLevel strict), KaTeX math — all downstream of the sanitize pass
 - [x] 5.4 Sanitization pipeline (rehype-sanitize) so untrusted markdown/HTML cannot script in the host app
 - [x] 5.5 JSON tree inspector: collapsible tree with search (filters to matching subtrees), type badges (object/array counts), value previews, hover copy-as-path
 - [ ] 5.6 Interactive node-graph view for JSON/YAML/XML/CSV (evaluate embedding JSON Crack's Apache-2.0 graph engine vs. building on React Flow)
 - [x] 5.7 CSV/TSV renderer: PapaParse → sortable (numeric-aware), filterable table with sticky header
 - [x] 5.8 YAML/TOML support: js-yaml / smol-toml parse, routed through the JSON tree (graph view pending 5.6)
-- [ ] 5.9 Theming system: user-selectable document themes (typography, spacing, palette) applied live; custom themes savable per workspace
-- [ ] 5.10 Format conversion utilities: JSON ↔ YAML ↔ CSV ↔ XML
-- [ ] 5.11 Export styled views to standalone HTML, PDF, and image
-- [ ] 5.12 Performance: virtualized rendering for large files (multi-MB JSON, long markdown docs)
+- [x] 5.9 Theming: Default / Serif / Compact document themes applied live, saved per workspace — free-form custom themes can layer on later
+- [x] 5.10 Format conversion: JSON ↔ YAML ↔ TOML and CSV ↔ JSON from the Studio's Convert menu; writes a sibling file and opens it (XML joins with 5.6's XML support)
+- [x] 5.11 Export: Markdown views to standalone HTML and PDF (hidden-window print) with embedded theme CSS; any styled view to PNG (stage capture); native save dialogs
+- [x] 5.12 Virtualized rendering: JSON tree flattens visible nodes and windows the viewport; CSV table windows rows — display caps removed, multi-MB files stay responsive
 
 ## Phase 6 — Agent Orchestration (Mission Control)
 

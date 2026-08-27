@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react'
 import Papa from 'papaparse'
+import { useVirtualRows } from '@/virtual'
 
-/** CSV/TSV as a sortable, filterable table. Display capped pending 5.12. */
+/** CSV/TSV as a sortable, filterable, row-virtualized table. */
 
-const ROW_CAP = 500
+const ROW_HEIGHT = 29
 
 export function CsvTable({
   content,
@@ -40,6 +41,11 @@ export function CsvTable({
     return out
   }, [rows, filter, sort])
 
+  const { containerRef, onScroll, start, end, padTop, padBottom } = useVirtualRows(
+    visible.length,
+    ROW_HEIGHT
+  )
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-none items-center gap-3 border-b border-slate-200 px-3 py-2 dark:border-slate-800">
@@ -49,14 +55,11 @@ export function CsvTable({
           placeholder="Filter rows…"
           className="w-64 rounded-md border border-slate-300 bg-slate-50 px-2.5 py-1 text-xs outline-none focus:border-sky-500 dark:border-slate-700 dark:bg-[#0b0f14]"
         />
-        <span className="text-[11px] text-slate-500">
-          {visible.length.toLocaleString()} rows
-          {visible.length > ROW_CAP ? ` · showing first ${ROW_CAP}` : ''}
-        </span>
+        <span className="text-[11px] text-slate-500">{visible.length.toLocaleString()} rows</span>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div ref={containerRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-auto">
         <table className="w-full border-collapse text-xs">
-          <thead className="sticky top-0 bg-slate-100 dark:bg-[#101827]">
+          <thead className="sticky top-0 z-10 bg-slate-100 dark:bg-[#101827]">
             <tr>
               {header.map((cell, i) => (
                 <th
@@ -75,8 +78,13 @@ export function CsvTable({
             </tr>
           </thead>
           <tbody>
-            {visible.slice(0, ROW_CAP).map((row, r) => (
-              <tr key={r} className="odd:bg-slate-50 dark:odd:bg-[#0d131d]">
+            {padTop > 0 && <tr style={{ height: padTop }} />}
+            {visible.slice(start, end).map((row, r) => (
+              <tr
+                key={start + r}
+                style={{ height: ROW_HEIGHT }}
+                className="odd:bg-slate-50 dark:odd:bg-[#0d131d]"
+              >
                 {header.map((_, c) => (
                   <td
                     key={c}
@@ -87,6 +95,7 @@ export function CsvTable({
                 ))}
               </tr>
             ))}
+            {padBottom > 0 && <tr style={{ height: padBottom }} />}
           </tbody>
         </table>
       </div>

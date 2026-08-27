@@ -80,6 +80,12 @@ const api: AgwebApi = {
     }
   },
   confirm: (message) => ipcRenderer.invoke(IpcChannels.dialogConfirm, message),
+  search: (query) => ipcRenderer.invoke(IpcChannels.searchQuery, query),
+  exports: {
+    html: (html, name) => ipcRenderer.invoke(IpcChannels.exportHtml, html, name),
+    pdf: (html, name) => ipcRenderer.invoke(IpcChannels.exportPdf, html, name),
+    capture: (rect, name) => ipcRenderer.invoke(IpcChannels.exportCapture, rect, name)
+  },
   terminal: {
     create: (id, cols, rows) => ipcRenderer.invoke(IpcChannels.termCreate, id, cols, rows),
     input: (id, data) => ipcRenderer.invoke(IpcChannels.termInput, id, data),

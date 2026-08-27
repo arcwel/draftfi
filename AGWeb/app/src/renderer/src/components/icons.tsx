@@ -170,7 +170,9 @@ export function BlockTypeIcon({
   type,
   size = 15,
   className
-}: IconProps & { type: 'editor' | 'files' | 'terminal' | 'agents' | 'logs' }): React.JSX.Element {
+}: IconProps & {
+  type: 'editor' | 'files' | 'terminal' | 'agents' | 'logs' | 'search'
+}): React.JSX.Element {
   const common = {
     width: size,
     height: size,
@@ -212,6 +214,13 @@ export function BlockTypeIcon({
       return (
         <svg {...common}>
           <path d="M4 6h16M4 12h16M4 18h10" />
+        </svg>
+      )
+    case 'search':
+      return (
+        <svg {...common}>
+          <circle cx="11" cy="11" r="7" />
+          <path d="M21 21l-4.3-4.3" />
         </svg>
       )
   }

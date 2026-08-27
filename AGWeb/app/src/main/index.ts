@@ -48,6 +48,8 @@ import {
   resizeTerminal,
   writeTerminal
 } from './terminal'
+import { searchWorkspace } from './search'
+import { exportCapture, exportHtml, exportPdf } from './export'
 import type { WorkspaceInfo } from '@shared/ipc'
 
 // Test/dev hooks: isolate state and open a workspace without the dialog.
@@ -300,6 +302,32 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IpcChannels.termAttach, (_e, id: unknown) => {
     const t = str(id)
     return t ? attachTerminal(t) : { buffer: '', running: false }
+  })
+
+  ipcMain.handle(IpcChannels.searchQuery, (_e, query: unknown) => {
+    const q = str(query)
+    return q ? searchWorkspace(q) : []
+  })
+
+  const owner = (event: Electron.IpcMainInvokeEvent): BrowserWindow | null =>
+    BrowserWindow.fromWebContents(event.sender)
+
+  ipcMain.handle(IpcChannels.exportHtml, (event, html: unknown, name: unknown) => {
+    const h = str(html)
+    if (h === null) return { error: 'bad arguments' }
+    return exportHtml(owner(event), h, str(name) ?? 'document.html')
+  })
+  ipcMain.handle(IpcChannels.exportPdf, (event, html: unknown, name: unknown) => {
+    const h = str(html)
+    if (h === null) return { error: 'bad arguments' }
+    return exportPdf(owner(event), h, str(name) ?? 'document.pdf')
+  })
+  ipcMain.handle(IpcChannels.exportCapture, (event, rect: unknown, name: unknown) => {
+    const r = rect as Rect
+    if (!r || ![r.x, r.y, r.width, r.height].every((n) => Number.isFinite(n))) {
+      return { error: 'bad arguments' }
+    }
+    return exportCapture(owner(event), r, str(name) ?? 'document.png')
   })
 }
 

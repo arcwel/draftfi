@@ -14,12 +14,35 @@ const screenshotPath = process.argv[2] ?? 'smoke.png'
 const workspace = mkdtempSync(join(tmpdir(), 'agweb-ws-'))
 writeFileSync(
   join(workspace, 'hello.md'),
-  '# Hello Studio\n\nhello agweb\n\n- [x] tasks render\n\n| col | value |\n| --- | ----- |\n| one | 1 |\n'
+  [
+    '# Hello Studio',
+    '',
+    'hello agweb',
+    '',
+    '- [x] tasks render',
+    '',
+    '| col | value |',
+    '| --- | ----- |',
+    '| one | 1 |',
+    '',
+    '```js',
+    'const greeting = "hi"',
+    '```',
+    '',
+    'Euler: $e^{i\\pi} + 1 = 0$',
+    '',
+    '```mermaid',
+    'graph LR',
+    '  A[Browser] --> B[Deck]',
+    '```',
+    ''
+  ].join('\n')
 )
 writeFileSync(join(workspace, 'data.json'), '{"name":"agweb","tags":["ide","browser"]}\n')
 writeFileSync(join(workspace, 'table.csv'), 'city,pop\nTokyo,37\nDelhi,32\n')
 mkdirSync(join(workspace, 'src'))
 writeFileSync(join(workspace, 'src', 'index.ts'), 'export const answer = 42\n')
+writeFileSync(join(workspace, 'src', 'messy.ts'), 'const messy={alpha:1,beta:2}\n')
 
 const app = await electron.launch({
   args: ['out/main/index.js', '--no-sandbox'],
@@ -70,11 +93,44 @@ try {
   await window.keyboard.press('Enter')
   await window.waitForSelector('text=smoke-42', { timeout: 15000 })
 
-  // Document Studio: markdown renders styled in a doc tab; Source toggles to
-  // Monaco; JSON gets the tree inspector; CSV gets the sortable table.
+  // Formatter: Prettier normalizes messy.ts; save; verify on disk. Prettier's
+  // chunks load lazily, so retry the format→save cycle until disk shows it.
+  await window.click('text=messy.ts')
+  await window.waitForSelector('text=messy', { timeout: 15000 })
+  await waitForAsync(
+    async () => {
+      await window.click('button:has-text("Format")')
+      await window.waitForTimeout(800)
+      await window.click('.monaco-editor .view-lines')
+      await window.keyboard.press('ControlOrMeta+s')
+      await window.waitForTimeout(300)
+      return readFileSync(join(workspace, 'src', 'messy.ts'), 'utf8').includes('alpha: 1')
+    },
+    20000,
+    'formatted content did not reach disk'
+  )
+
+  // Diff: buffer vs disk overlay opens and closes.
+  await window.click('button:has-text("Diff")')
+  await window.waitForSelector('text=saved on disk', { timeout: 10000 })
+  await window.click('button[aria-label="Close diff"]')
+
+  // Project search: add a Search block, find a symbol.
+  await window.click('button:has-text("+ Block")')
+  await window.click('button:has-text("Search")')
+  await window.fill('input[placeholder="Search project…"]', 'answer')
+  await window.press('input[placeholder="Search project…"]', 'Enter')
+  await window.waitForSelector('text=src/index.ts', { timeout: 15000 })
+
+  // Document Studio: markdown renders styled in a doc tab (with highlighted
+  // code, KaTeX math, and a Mermaid diagram); Source toggles to Monaco;
+  // JSON gets the tree inspector; CSV gets the sortable table.
   await window.click('text=hello.md')
   await window.waitForSelector('h1:has-text("Hello Studio")', { timeout: 15000 })
   await window.waitForSelector('text=tasks render')
+  await window.waitForSelector('.hljs-keyword', { timeout: 15000 })
+  await window.waitForSelector('.katex', { timeout: 15000 })
+  await window.waitForSelector('.mermaid-diagram svg', { timeout: 30000 })
   await window.waitForTimeout(400)
   await window.screenshot({ path: screenshotPath })
 
@@ -86,6 +142,15 @@ try {
   await window.click('text=data.json')
   await window.waitForSelector('text=tags', { timeout: 15000 })
   await window.waitForSelector('text=array') // the tags node's type badge (array·2)
+
+  // Format conversion: JSON → YAML writes a sibling file and opens it.
+  await window.click('button:has-text("Convert")')
+  await window.click('button:has-text("to .yaml")')
+  await waitFor(
+    () => readFileSync(join(workspace, 'data.yaml'), 'utf8').includes('name: agweb'),
+    15000,
+    'converted YAML did not reach disk'
+  )
 
   await window.click('text=table.csv')
   await window.waitForSelector('th:has-text("city")', { timeout: 15000 })
@@ -139,6 +204,18 @@ try {
   console.log(`smoke OK — screenshot: ${screenshotPath}`)
 } finally {
   await app.close()
+}
+
+async function waitForAsync(check, timeoutMs, message) {
+  const start = Date.now()
+  for (;;) {
+    try {
+      if (await check()) return
+    } catch {
+      // retry
+    }
+    if (Date.now() - start > timeoutMs) throw new Error(message)
+  }
 }
 
 async function waitFor(check, timeoutMs, message) {

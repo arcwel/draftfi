@@ -58,7 +58,8 @@ export const BLOCK_LABELS: Record<BlockType, string> = {
   files: 'Files',
   terminal: 'Terminal',
   agents: 'Agents',
-  logs: 'Logs'
+  logs: 'Logs',
+  search: 'Search'
 }
 
 /** Which shell window this renderer is: the browser, the detached deck, or a float. */
@@ -246,9 +247,14 @@ interface ShellState {
   restoreFromRail(blockId: string): void
   applyPreset(preset: DeckPreset): void
 
-  openFile(path: string): void
+  openFile(path: string, line?: number): void
   closeEditorTab(path: string): void
   setFileDirty(path: string, dirty: boolean): void
+  /** Line the editor should scroll to after opening activeEditorPath. */
+  pendingRevealLine: number | null
+  clearPendingReveal(): void
+  /** Add a fresh block of `type` to the deck as its own group. */
+  addBlock(type: BlockType): void
 }
 
 const initialTab = makeTab()
@@ -459,11 +465,30 @@ export const useShellStore = create<ShellState>((set) => ({
       }
     }),
 
-  openFile: (path) =>
+  pendingRevealLine: null,
+  clearPendingReveal: () => set({ pendingRevealLine: null }),
+
+  openFile: (path, line) =>
     set((state) => ({
       editorTabs: state.editorTabs.includes(path) ? state.editorTabs : [...state.editorTabs, path],
-      activeEditorPath: path
+      activeEditorPath: path,
+      pendingRevealLine: line ?? null,
+      deckRevealed: state.deckMode === 'attached' ? true : state.deckRevealed
     })),
+
+  addBlock: (type) =>
+    set((state) => {
+      const block = makeBlock(type)
+      const zone: DeckZone = type === 'terminal' || type === 'logs' ? 'bottom' : 'right'
+      return {
+        blocks: { ...state.blocks, [block.id]: block },
+        groups: [
+          ...state.groups,
+          { ...makeGroup(zone, []), blockIds: [block.id], activeBlockId: block.id }
+        ],
+        deckRevealed: state.deckMode === 'attached' ? true : state.deckRevealed
+      }
+    }),
 
   closeEditorTab: (path) =>
     set((state) => {

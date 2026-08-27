@@ -246,3 +246,70 @@ body,
 .doc-md input[type='checkbox'] {
   margin-right: 0.4em;
 }
+
+/* Document themes */
+.doc-theme-serif {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 17px;
+  line-height: 1.7;
+}
+.doc-theme-compact {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* Code highlighting tokens (highlight.js class names), light + dark */
+.doc-md .hljs-keyword,
+.doc-md .hljs-selector-tag,
+.doc-md .hljs-meta {
+  color: #9333ea;
+}
+.doc-md .hljs-string,
+.doc-md .hljs-attr,
+.doc-md .hljs-regexp {
+  color: #15803d;
+}
+.doc-md .hljs-title,
+.doc-md .hljs-name,
+.doc-md .hljs-built_in {
+  color: #0369a1;
+}
+.doc-md .hljs-comment,
+.doc-md .hljs-quote {
+  color: #64748b;
+}
+.doc-md .hljs-number,
+.doc-md .hljs-literal,
+.doc-md .hljs-type {
+  color: #b45309;
+}
+.dark .doc-md .hljs-keyword,
+.dark .doc-md .hljs-selector-tag,
+.dark .doc-md .hljs-meta {
+  color: #c084fc;
+}
+.dark .doc-md .hljs-string,
+.dark .doc-md .hljs-attr,
+.dark .doc-md .hljs-regexp {
+  color: #86efac;
+}
+.dark .doc-md .hljs-title,
+.dark .doc-md .hljs-name,
+.dark .doc-md .hljs-built_in {
+  color: #7dd3fc;
+}
+.dark .doc-md .hljs-number,
+.dark .doc-md .hljs-literal,
+.dark .doc-md .hljs-type {
+  color: #fcd34d;
+}
+
+/* Mermaid diagrams center in the document flow */
+.mermaid-diagram {
+  display: block;
+  margin: 0 0 1em;
+  text-align: center;
+}
+.mermaid-diagram svg {
+  max-width: 100%;
+}

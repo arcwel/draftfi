@@ -79,8 +79,19 @@ export const IpcChannels = {
   termInput: 'term:input',
   termResize: 'term:resize',
   termDispose: 'term:dispose',
-  termAttach: 'term:attach'
+  termAttach: 'term:attach',
+  searchQuery: 'search:query',
+  exportHtml: 'export:html',
+  exportPdf: 'export:pdf',
+  exportCapture: 'export:capture'
 } as const
+
+/** One project-search match. */
+export interface SearchHit {
+  path: string
+  line: number
+  text: string
+}
 
 /** Events pushed from main to the renderer. */
 export const IpcEvents = {
@@ -162,6 +173,17 @@ export interface AgwebApi {
 
   /** Native confirm dialog (window.confirm is unavailable in Electron). */
   confirm(message: string): Promise<boolean>
+
+  /** Project-wide text search (ripgrep when available, Node fallback). */
+  search(query: string): Promise<SearchHit[]>
+
+  /** Document Studio exports; empty result = user cancelled the dialog. */
+  exports: {
+    html(html: string, suggestedName: string): Promise<{ path?: string; error?: string }>
+    pdf(html: string, suggestedName: string): Promise<{ path?: string; error?: string }>
+    /** Capture a region of this window (the stage) as a PNG. */
+    capture(rect: Rect, suggestedName: string): Promise<{ path?: string; error?: string }>
+  }
 
   /** Terminal sessions, keyed by block id; they outlive renderer mounts. */
   terminal: {

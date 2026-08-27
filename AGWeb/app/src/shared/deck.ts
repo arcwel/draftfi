@@ -1,6 +1,6 @@
 /** Dev Deck domain types, shared by main and every renderer window. */
 
-export type BlockType = 'editor' | 'files' | 'terminal' | 'agents' | 'logs'
+export type BlockType = 'editor' | 'files' | 'terminal' | 'agents' | 'logs' | 'search'
 /** Zones a group can dock into inside a window. */
 export type DockZone = 'right' | 'bottom'
 /** A group can also float in its own OS window. */
