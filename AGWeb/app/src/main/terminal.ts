@@ -58,11 +58,18 @@ function getHost(): ChildProcess | null {
     host = spawn(process.env.AGWEB_NODE ?? 'node', [hostScript, ptyModule], {
       stdio: ['pipe', 'pipe', 'inherit']
     })
-    host.on('exit', () => {
+    const hostDied = (): void => {
       for (const [id, session] of sessions) {
         if (session.backend === 'child' && session.running) endSession(id, -1)
       }
       host = null
+    }
+    host.on('exit', hostDied)
+    // Without this, a missing `node` binary raises an unhandled 'error'
+    // event and takes down the whole main process.
+    host.on('error', (error) => {
+      console.warn('pty host failed to start:', error)
+      hostDied()
     })
     createInterface({ input: host.stdout! }).on('line', (line) => {
       let msg: { ev: string; id: string; data?: string; code?: number }
@@ -122,6 +129,21 @@ export function createTerminal(id: string, cols: number, rows: number): void {
     return
   }
 
+  if (!getHost()) {
+    // No native pty and no system node to host one: surface a dead session
+    // instead of a silently blank terminal marked running.
+    sessions.set(id, { backend: 'child', buffer: '', running: false })
+    broadcast(
+      IpcEvents.termData,
+      {
+        id,
+        data: '\r\n[terminal unavailable: node-pty is not built for Electron and no `node` binary was found]\r\n'
+      },
+      null
+    )
+    broadcast(IpcEvents.termExit, { id, code: -1 }, null)
+    return
+  }
   sessions.set(id, { backend: 'child', buffer: '', running: true })
   hostSend({ op: 'create', id, cols, rows, cwd, shell })
 }

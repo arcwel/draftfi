@@ -101,6 +101,10 @@ function createMainWindow(): void {
     console.error(`Renderer gone (${details.reason}), restarts: ${rendererRestarts}`)
     if (rendererRestarts < MAX_RENDERER_RESTARTS) {
       rendererRestarts += 1
+      // The fresh renderer starts with empty tab state and restarting tab ids;
+      // the old WebContentsViews would otherwise stay painted over it and
+      // collide with reused ids.
+      destroyAllBrowserTabs()
       mainWindow.webContents.reload()
     }
   })

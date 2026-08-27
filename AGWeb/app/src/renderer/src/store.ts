@@ -534,6 +534,17 @@ export const useShellStore = create<ShellState>((set) => ({
               makeGroup('bottom', [...need('terminal'), ...need('logs')]),
               makeGroup('bottom', need('agents'))
             ]
+
+      // Blocks outside the preset's types (Search, Logs under Building…)
+      // must not be orphaned: keep each as its own group in a sensible zone.
+      const placed = new Set(groups.flatMap((g) => g.blockIds))
+      for (const block of Object.values(blocks)) {
+        if (placed.has(block.id)) continue
+        const zone: DeckZone =
+          block.type === 'terminal' || block.type === 'logs' ? 'bottom' : 'right'
+        groups.push({ ...makeGroup(zone, []), blockIds: [block.id], activeBlockId: block.id })
+      }
+
       return { blocks, groups, rail: [], deckRevealed: true }
     })
 }))

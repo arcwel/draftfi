@@ -34,15 +34,21 @@ export function TerminalBlock({ id }: { id: string }): React.JSX.Element {
     fit.fit()
     termRef.current = term
 
+    // Data events that arrive before the attach reply are already contained
+    // in the snapshot buffer (main appends before broadcasting), so writing
+    // them live AND replaying the buffer would duplicate scrollback. Hold
+    // live writes until the snapshot lands, then drop the overlap.
+    let attached = false
     void window.agweb.terminal.attach(id).then(({ buffer, running }) => {
       if (buffer) term.write(buffer)
+      attached = true
       if (!running) void window.agweb.terminal.create(id, term.cols, term.rows)
       else void window.agweb.terminal.resize(id, term.cols, term.rows)
     })
 
     const offInput = term.onData((data) => void window.agweb.terminal.input(id, data))
     const offData = window.agweb.terminal.onData((termId, data) => {
-      if (termId === id) term.write(data)
+      if (termId === id && attached) term.write(data)
     })
     const offExit = window.agweb.terminal.onExit((termId, code) => {
       if (termId === id) term.write(`\r\n[process exited with code ${code}]\r\n`)

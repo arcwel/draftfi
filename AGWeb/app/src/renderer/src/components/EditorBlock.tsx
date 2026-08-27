@@ -11,6 +11,9 @@ import { CloseIcon } from '@/components/icons'
  * ⇧⌥F formats (Prettier), and Diff compares the buffer against disk.
  */
 
+/** Workspace-relative path a model was created for (agweb:/<path>). */
+const pathOfModel = (model: monaco.editor.ITextModel): string => model.uri.path.replace(/^\//, '')
+
 export function EditorBlock(): React.JSX.Element {
   const editorTabs = useShellStore((s) => s.editorTabs)
   const activePath = useShellStore((s) => s.activeEditorPath)
@@ -23,16 +26,11 @@ export function EditorBlock(): React.JSX.Element {
 
   const containerRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null)
-  const activePathRef = useRef(activePath)
-  useEffect(() => {
-    activePathRef.current = activePath
-  }, [activePath])
 
   const runFormat = async (): Promise<void> => {
-    const path = activePathRef.current
     const model = editorRef.current?.getModel()
-    if (!path || !model) return
-    const error = await formatModel(path, model)
+    if (!model) return
+    const error = await formatModel(pathOfModel(model), model)
     setFormatError(error)
     if (!error) setTimeout(() => setFormatError(null), 1)
   }
@@ -48,9 +46,12 @@ export function EditorBlock(): React.JSX.Element {
       theme: useShellStore.getState().theme === 'dark' ? 'vs-dark' : 'vs'
     })
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      const path = activePathRef.current
+      // The path must come from the mounted model, not the active-tab state:
+      // during the async model swap after a tab switch they briefly disagree,
+      // and writing tab B's path with tab A's model would destroy B on disk.
       const model = editor.getModel()
-      if (!path || !model) return
+      if (!model) return
+      const path = pathOfModel(model)
       void window.agweb.fs.write(path, model.getValue()).then((result) => {
         if (!result.error) useShellStore.getState().setFileDirty(path, false)
       })

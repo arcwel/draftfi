@@ -57,3 +57,19 @@ export function convertContent(content: string, fromExt: string, toExt: string):
       throw new Error(`Unsupported target .${toExt}`)
   }
 }
+
+/** Parse a tree-type document (json/yaml/yml/toml) for the Studio's views. */
+export function parseTreeDoc(ext: string, content: string): { data: unknown } | { error: string } {
+  try {
+    return {
+      data:
+        ext === 'json'
+          ? (JSON.parse(content) as unknown)
+          : ext === 'toml'
+            ? parseToml(content)
+            : parseYaml(content)
+    }
+  } catch (error) {
+    return { error: String(error) }
+  }
+}

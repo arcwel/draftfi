@@ -24,54 +24,82 @@ function resolveInWorkspace(rel: string): string | null {
   return full
 }
 
+// Every op honors its {error} result contract: a thrown ENOENT/EEXIST/EACCES
+// must reach the renderer as data, never as a rejected IPC invoke.
+const message = (error: unknown): string => (error instanceof Error ? error.message : String(error))
+
 export async function listDir(rel: string): Promise<FsEntry[]> {
   const full = resolveInWorkspace(rel)
   if (!full) return []
-  const entries = await fsp.readdir(full, { withFileTypes: true })
-  return entries
-    .filter((e) => e.isDirectory() || e.isFile())
-    .map((e): FsEntry => ({ name: e.name, kind: e.isDirectory() ? 'dir' : 'file' }))
-    .sort((a, b) =>
-      a.kind !== b.kind ? (a.kind === 'dir' ? -1 : 1) : a.name.localeCompare(b.name)
-    )
+  try {
+    const entries = await fsp.readdir(full, { withFileTypes: true })
+    return entries
+      .filter((e) => e.isDirectory() || e.isFile())
+      .map((e): FsEntry => ({ name: e.name, kind: e.isDirectory() ? 'dir' : 'file' }))
+      .sort((a, b) =>
+        a.kind !== b.kind ? (a.kind === 'dir' ? -1 : 1) : a.name.localeCompare(b.name)
+      )
+  } catch {
+    return []
+  }
 }
 
 export async function readFile(rel: string): Promise<{ content?: string; error?: string }> {
   const full = resolveInWorkspace(rel)
   if (!full) return { error: 'no workspace' }
-  const stat = await fsp.stat(full)
-  if (stat.size > MAX_FILE_BYTES) return { error: 'File is too large to open (2 MB limit).' }
-  return { content: await fsp.readFile(full, 'utf8') }
+  try {
+    const stat = await fsp.stat(full)
+    if (stat.size > MAX_FILE_BYTES) return { error: 'File is too large to open (2 MB limit).' }
+    return { content: await fsp.readFile(full, 'utf8') }
+  } catch (error) {
+    return { error: message(error) }
+  }
 }
 
 export async function writeFile(rel: string, content: string): Promise<{ error?: string }> {
   const full = resolveInWorkspace(rel)
   if (!full) return { error: 'no workspace' }
-  await fsp.writeFile(full, content, 'utf8')
-  return {}
+  try {
+    await fsp.writeFile(full, content, 'utf8')
+    return {}
+  } catch (error) {
+    return { error: message(error) }
+  }
 }
 
 export async function createEntry(rel: string, kind: 'file' | 'dir'): Promise<{ error?: string }> {
   const full = resolveInWorkspace(rel)
   if (!full) return { error: 'no workspace' }
-  if (kind === 'dir') await fsp.mkdir(full, { recursive: true })
-  else await fsp.writeFile(full, '', { flag: 'wx' })
-  return {}
+  try {
+    if (kind === 'dir') await fsp.mkdir(full, { recursive: true })
+    else await fsp.writeFile(full, '', { flag: 'wx' })
+    return {}
+  } catch (error) {
+    return { error: message(error) }
+  }
 }
 
 export async function renameEntry(fromRel: string, toRel: string): Promise<{ error?: string }> {
   const from = resolveInWorkspace(fromRel)
   const to = resolveInWorkspace(toRel)
   if (!from || !to) return { error: 'no workspace' }
-  await fsp.rename(from, to)
-  return {}
+  try {
+    await fsp.rename(from, to)
+    return {}
+  } catch (error) {
+    return { error: message(error) }
+  }
 }
 
 export async function deleteEntry(rel: string): Promise<{ error?: string }> {
   const full = resolveInWorkspace(rel)
   if (!full || full === getCurrentWorkspace()?.path) return { error: 'invalid path' }
-  await fsp.rm(full, { recursive: true })
-  return {}
+  try {
+    await fsp.rm(full, { recursive: true })
+    return {}
+  } catch (error) {
+    return { error: message(error) }
+  }
 }
 
 /* ---- Change watching ---- */

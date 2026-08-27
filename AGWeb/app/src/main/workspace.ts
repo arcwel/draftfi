@@ -1,6 +1,6 @@
 import { dialog } from 'electron'
 import { statSync } from 'node:fs'
-import { basename } from 'node:path'
+import { basename, resolve } from 'node:path'
 import type { RecentProject, WorkspaceInfo } from '@shared/ipc'
 import { JsonStore } from './json-store'
 
@@ -29,7 +29,10 @@ export function getRecentProjects(): RecentProject[] {
   })
 }
 
-export function openWorkspacePath(path: string): WorkspaceInfo | null {
+export function openWorkspacePath(rawPath: string): WorkspaceInfo | null {
+  // Normalize (trailing slashes, '..'): the fs layer's inside-workspace
+  // prefix check assumes a canonical root.
+  const path = resolve(rawPath)
   try {
     if (!statSync(path).isDirectory()) return null
   } catch {

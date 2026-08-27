@@ -118,6 +118,9 @@ export function JsonGraph({ data }: { data: unknown }): React.JSX.Element {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [view, setView] = useState({ tx: 40, ty: 40, scale: 1 })
   const drag = useRef<{ x: number; y: number; tx: number; ty: number; moved: boolean } | null>(null)
+  // Click fires after pointerup (drag.current already null), so the "was
+  // this a pan?" answer must survive the pointerup.
+  const lastDragMoved = useRef(false)
 
   const { nodes, rootId, truncated } = useMemo(() => buildNodes(data as Json), [data])
   const visible = useMemo(() => {
@@ -177,6 +180,7 @@ export function JsonGraph({ data }: { data: unknown }): React.JSX.Element {
         className="h-full w-full cursor-grab active:cursor-grabbing"
         onPointerDown={(e) => {
           drag.current = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty, moved: false }
+          lastDragMoved.current = false
           ;(e.target as Element).setPointerCapture?.(e.pointerId)
         }}
         onPointerMove={(e) => {
@@ -187,6 +191,7 @@ export function JsonGraph({ data }: { data: unknown }): React.JSX.Element {
           setView((v) => ({ ...v, tx: drag.current!.tx + dx, ty: drag.current!.ty + dy }))
         }}
         onPointerUp={() => {
+          lastDragMoved.current = drag.current?.moved ?? false
           drag.current = null
         }}
         onWheel={(e) => {
@@ -220,7 +225,7 @@ export function JsonGraph({ data }: { data: unknown }): React.JSX.Element {
               key={node.id}
               transform={`translate(${node.x}, ${node.y})`}
               onClick={() => {
-                if (drag.current?.moved) return
+                if (lastDragMoved.current) return
                 if (node.childIds.length > 0) toggle(node.id)
               }}
               style={{ cursor: node.childIds.length > 0 ? 'pointer' : 'default' }}

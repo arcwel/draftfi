@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -11,9 +11,7 @@ import { ensureModel, monaco } from '@/monaco'
 import { JsonTree } from '@/components/JsonTree'
 import { JsonGraph } from '@/components/JsonGraph'
 import { CsvTable } from '@/components/CsvTable'
-import { load as parseYaml } from 'js-yaml'
-import { parse as parseToml } from 'smol-toml'
-import { conversionTargets, convertContent } from '@/convert'
+import { conversionTargets, convertContent, parseTreeDoc } from '@/convert'
 import { DOC_THEMES, loadDocTheme, saveDocTheme, standaloneHtml, type DocTheme } from '@/docThemes'
 
 /**
@@ -212,7 +210,7 @@ export function DocStudio({ path }: { path: string }): React.JSX.Element {
         {!error && content === null && <div className="p-6 text-sm text-slate-500">Loading…</div>}
         {!error && content !== null && mode === 'source' && <SourcePane path={path} />}
         {!error && content !== null && mode === 'graph' && isTreeDoc && (
-          <GraphPane ext={ext} content={content} />
+          <TreePane ext={ext} content={content} view="graph" />
         )}
         {!error && content !== null && mode === 'styled' && (
           <StyledView ext={ext} content={content} docTheme={docTheme} />
@@ -274,28 +272,29 @@ function StyledView({
   if (ext === 'csv' || ext === 'tsv') {
     return <CsvTable content={content} delimiter={ext === 'tsv' ? '\t' : undefined} />
   }
-  // Parse outside JSX so a bad document renders a friendly notice.
-  let data: unknown
-  let parseError: unknown = null
-  try {
-    data =
-      ext === 'json'
-        ? (JSON.parse(content) as unknown)
-        : ext === 'toml'
-          ? parseToml(content)
-          : parseYaml(content)
-  } catch (caught) {
-    parseError = caught
-  }
-  if (parseError !== null) {
+  return <TreePane ext={ext} content={content} view="tree" />
+}
+
+/** Shared memoized parse for the tree and graph views of json/yaml/toml. */
+function TreePane({
+  ext,
+  content,
+  view
+}: {
+  ext: string
+  content: string
+  view: 'tree' | 'graph'
+}): React.JSX.Element {
+  const parsed = useMemo(() => parseTreeDoc(ext, content), [ext, content])
+  if ('error' in parsed) {
     return (
       <div className="p-6 text-sm">
         <div className="font-semibold text-red-500">This file doesn&apos;t parse as {ext}.</div>
-        <div className="mt-2 font-mono text-xs text-slate-500">{String(parseError)}</div>
+        <div className="mt-2 font-mono text-xs text-slate-500">{parsed.error}</div>
       </div>
     )
   }
-  return <JsonTree data={data} />
+  return view === 'graph' ? <JsonGraph data={parsed.data} /> : <JsonTree data={parsed.data} />
 }
 
 /** Code renderer: mermaid fences become live diagrams; the rest highlight. */
@@ -366,10 +365,14 @@ function SourcePane({ path }: { path: string }): React.JSX.Element {
         if (!result.error) useShellStore.getState().setFileDirty(path, false)
       })
     })
+    let disposed = false
     void ensureModel(path).then((model) => {
-      if (model) editor.setModel(model)
+      if (!disposed && model) editor.setModel(model)
     })
-    return () => editor.dispose()
+    return () => {
+      disposed = true
+      editor.dispose()
+    }
   }, [path])
 
   useEffect(() => {
@@ -377,29 +380,4 @@ function SourcePane({ path }: { path: string }): React.JSX.Element {
   }, [theme])
 
   return <div ref={containerRef} className="h-full" />
-}
-
-/** Parse a tree-type document and hand it to the graph, or show the error. */
-function GraphPane({ ext, content }: { ext: string; content: string }): React.JSX.Element {
-  let data: unknown
-  let parseError: unknown = null
-  try {
-    data =
-      ext === 'json'
-        ? (JSON.parse(content) as unknown)
-        : ext === 'toml'
-          ? parseToml(content)
-          : parseYaml(content)
-  } catch (caught) {
-    parseError = caught
-  }
-  if (parseError !== null) {
-    return (
-      <div className="p-6 text-sm">
-        <div className="font-semibold text-red-500">This file doesn&apos;t parse as {ext}.</div>
-        <div className="mt-2 font-mono text-xs text-slate-500">{String(parseError)}</div>
-      </div>
-    )
-  }
-  return <JsonGraph data={data} />
 }
