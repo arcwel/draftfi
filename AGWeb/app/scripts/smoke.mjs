@@ -3,7 +3,7 @@
 // presets, drag-to-stack, rail, float window, detached deck window.
 // Usage: node scripts/smoke.mjs [screenshot.png]   (run under xvfb on CI)
 import { _electron as electron } from 'playwright-core'
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -134,12 +134,22 @@ try {
   })
   await window.waitForSelector('text=Write AGENT_NOTE.md')
   await window.click('[data-testid="agent-approve"]')
-  await window.waitForSelector('[data-testid="agent-status"]:has-text("Done")', { timeout: 15000 })
+  await window.waitForSelector('[data-testid="agent-status"]:has-text("Done")', { timeout: 30000 })
   await window.waitForSelector('text=Task complete.')
   await waitFor(
     () => readFileSync(join(workspace, 'AGENT_NOTE.md'), 'utf8').includes('Record this smoke task'),
     10000,
     'agent-written file did not reach disk'
+  )
+
+  // Browser-verification loop (Phase 7): the agent opened a real tab (visible
+  // in the tab strip), clicked it, asserted on the DOM, and saved a screenshot.
+  await window.waitForSelector('text=Agent Target', { timeout: 10000 })
+  await window.waitForSelector('text=clicked-ok')
+  await waitFor(
+    () => statSync(join(workspace, 'agent-shot.png')).size > 1000,
+    10000,
+    'agent screenshot did not reach disk'
   )
   await window.screenshot({ path: screenshotPath.replace(/\.png$/, '-agents.png') })
 

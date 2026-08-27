@@ -82,6 +82,12 @@ export function withTab(tabId: string, fn: (view: WebContentsView) => void): voi
   if (view && !view.webContents.isDestroyed()) fn(view)
 }
 
+/** Live webContents for a tab, or null. Used by the agent↔browser bridge. */
+export function getTabWebContents(tabId: string): WebContents | null {
+  const view = views.get(tabId)
+  return view && !view.webContents.isDestroyed() ? view.webContents : null
+}
+
 export function navigate(tabId: string, url: string): void {
   withTab(tabId, (view) => {
     view.webContents.loadURL(url).catch(() => {

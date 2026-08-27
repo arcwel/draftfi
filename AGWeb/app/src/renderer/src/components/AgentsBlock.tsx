@@ -249,6 +249,8 @@ const LOG_COLORS: Record<AgentLogEntry['kind'], string> = {
   tool: 'text-slate-400',
   edit: 'text-emerald-600 dark:text-emerald-400',
   command: 'text-indigo-600 dark:text-indigo-400',
+  browser: 'text-cyan-600 dark:text-cyan-400',
+  screenshot: 'text-purple-600 dark:text-purple-400',
   error: 'text-red-500'
 }
 

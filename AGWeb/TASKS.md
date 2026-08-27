@@ -97,11 +97,11 @@ Build our own thin viewer shell composed from open-source rendering primitives (
 
 ## Phase 7 — Autonomous Browser Control & Verification
 
-- [ ] 7.1 Agent↔browser control bridge: navigate, click, type, complete forms, trigger DOM events on internal browser tabs
-- [ ] 7.2 UI verification hooks: assert on DOM state, responsiveness checks across viewport sizes
-- [ ] 7.3 Screenshot capture API for agents (full page + element-level)
+- [x] 7.1 Agent↔browser control bridge (`src/main/agent-browser.ts`): `browser_open/navigate/click/type/wait_for` tools drive real shell tabs — the view is created in main and adopted into the tab strip so the user watches the agent work live; typing dispatches input/change events for framework-bound inputs
+- [x] 7.2 UI verification hooks: `browser_read` (page/element text) and `browser_eval` (arbitrary DOM assertions as JSON) + `browser_set_viewport` responsiveness emulation via Chromium device emulation (mobile/desktop, reset with 0×0)
+- [x] 7.3 Screenshot capture API: `browser_screenshot` saves full-page or element-level PNGs to workspace-relative paths, logged to Mission Control as screenshot entries
 - [ ] 7.4 Browser video recording of verification sessions
-- [ ] 7.5 End-to-end flow: agent edits code → boots dev server → drives browser → validates UI (PRD flow 4.1)
+- [x] 7.5 End-to-end flow validated in the smoke test (mock provider): agent writes a file → opens a tab → clicks → asserts the DOM updated → types and reads the value back → captures screenshot evidence on disk (PRD flow 4.1; a real dev-server run needs a live model)
 
 ## Phase 8 — Artifacts & Execution Reports
 

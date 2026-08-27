@@ -11,13 +11,15 @@ export interface PlanStep {
   detail?: string
 }
 
-export type AgentLogKind = 'status' | 'text' | 'tool' | 'edit' | 'command' | 'error'
+export type AgentLogKind =
+  'status' | 'text' | 'tool' | 'edit' | 'command' | 'browser' | 'screenshot' | 'error'
 
 export interface AgentLogEntry {
   ts: number
   kind: AgentLogKind
   text: string
-  /** For 'edit' entries: the touched file and its before/after content. */
+  /** For 'edit' entries: the touched file and its before/after content.
+   *  For 'screenshot' entries: the workspace-relative PNG path. */
   path?: string
   before?: string
   after?: string

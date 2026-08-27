@@ -105,6 +105,7 @@ export const IpcEvents = {
   workspaceChanged: 'event:workspace-changed',
   browserState: 'event:browser-state',
   browserOpenTab: 'event:browser-open-tab',
+  browserAdoptTab: 'event:browser-adopt-tab',
   shellSync: 'event:shell-sync',
   requestSync: 'event:request-sync',
   deckWindowClosed: 'event:deck-window-closed',
@@ -150,6 +151,8 @@ export interface AgwebApi {
     onState(listener: (state: BrowserTabState) => void): () => void
     /** Fired when a page requests a new window (target=_blank etc.). */
     onOpenTab(listener: (url: string) => void): () => void
+    /** An agent created a browser view in main; adopt it as a real tab. */
+    onAdoptTab(listener: (tabId: string, url: string) => void): () => void
   }
 
   /** Multi-window deck: the detached IDE window, float windows, state sync. */

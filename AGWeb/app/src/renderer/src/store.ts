@@ -228,6 +228,8 @@ interface ShellState {
   setTheme(theme: Theme): void
 
   newTab(initialUrl?: string): string
+  /** Adopt a browser view an agent created in main as a live tab. */
+  adoptBrowserTab(id: string): void
   /** Open (or focus) a Document Studio tab for a workspace file. */
   openDoc(path: string): void
   closeTab(id: string): void
@@ -304,6 +306,15 @@ export const useShellStore = create<ShellState>((set) => ({
     set((state) => ({ tabs: [...state.tabs, tab], activeTabId: tab.id }))
     return tab.id
   },
+
+  adoptBrowserTab: (id) =>
+    set((state) => {
+      if (state.tabs.some((t) => t.id === id)) return { activeTabId: id }
+      // The view already exists in main, so the tab starts with content; its
+      // title arrives with the first browserState push.
+      const tab: BrowserTab = { id, kind: 'web', title: 'Agent tab', hasContent: true }
+      return { tabs: [...state.tabs, tab], activeTabId: id }
+    }),
 
   openDoc: (path) =>
     set((state) => {

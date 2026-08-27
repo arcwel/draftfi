@@ -5,7 +5,18 @@ import { IpcEvents } from '@shared/ipc'
 import type { AgentKeyStatus, AgentLogEntry, AgentSessionInfo, PlanStep } from '@shared/agents'
 import { broadcast } from './windows'
 import { getCurrentWorkspace } from './workspace'
-import { createEntry, listDir, readFile, writeFile } from './fs'
+import { createEntry, listDir, readFile, writeBinaryFile, writeFile } from './fs'
+import {
+  agentCapture,
+  agentClick,
+  agentEval,
+  agentNavigate,
+  agentOpenTab,
+  agentReadPage,
+  agentSetViewport,
+  agentType,
+  agentWaitFor
+} from './agent-browser'
 import { searchWorkspace } from './search'
 import { JsonStore } from './json-store'
 
@@ -274,6 +285,128 @@ const EXEC_TOOLS: Anthropic.Tool[] = [
       properties: { command: { type: 'string' } }
     },
     strict: true
+  },
+  {
+    name: 'browser_open',
+    description:
+      'Open a new tab in the shell browser, navigate it to a URL, and return its tabId. The tab appears in the tab strip so the user watches you drive it. Use for verifying UIs (e.g. a dev server you started).',
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['url'],
+      properties: { url: { type: 'string' } }
+    },
+    strict: true
+  },
+  {
+    name: 'browser_navigate',
+    description: 'Navigate an open browser tab to a URL and wait for the page to load.',
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['tab_id', 'url'],
+      properties: { tab_id: { type: 'string' }, url: { type: 'string' } }
+    },
+    strict: true
+  },
+  {
+    name: 'browser_read',
+    description:
+      "Read the page: title, URL, and visible text. Pass a CSS selector to read just one element's text.",
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['tab_id'],
+      properties: { tab_id: { type: 'string' }, selector: { type: 'string' } }
+    },
+    strict: true
+  },
+  {
+    name: 'browser_eval',
+    description:
+      'Evaluate a JavaScript expression in the page and return its result as JSON. Use for DOM assertions (element counts, computed styles, attribute values).',
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['tab_id', 'expression'],
+      properties: { tab_id: { type: 'string' }, expression: { type: 'string' } }
+    },
+    strict: true
+  },
+  {
+    name: 'browser_click',
+    description: 'Click the first element matching a CSS selector.',
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['tab_id', 'selector'],
+      properties: { tab_id: { type: 'string' }, selector: { type: 'string' } }
+    },
+    strict: true
+  },
+  {
+    name: 'browser_type',
+    description:
+      'Type into an input, textarea, or contenteditable element (dispatches input/change events so framework bindings update).',
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['tab_id', 'selector', 'text'],
+      properties: {
+        tab_id: { type: 'string' },
+        selector: { type: 'string' },
+        text: { type: 'string' }
+      }
+    },
+    strict: true
+  },
+  {
+    name: 'browser_wait_for',
+    description:
+      'Wait until an element matching the CSS selector exists (default timeout 10000 ms). Use after navigation or actions that render asynchronously.',
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['tab_id', 'selector'],
+      properties: {
+        tab_id: { type: 'string' },
+        selector: { type: 'string' },
+        timeout_ms: { type: 'number' }
+      }
+    },
+    strict: true
+  },
+  {
+    name: 'browser_screenshot',
+    description:
+      'Capture the page (or one element via CSS selector) as a PNG saved at a workspace-relative path, e.g. "shots/home.png".',
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['tab_id', 'path'],
+      properties: {
+        tab_id: { type: 'string' },
+        path: { type: 'string' },
+        selector: { type: 'string' }
+      }
+    },
+    strict: true
+  },
+  {
+    name: 'browser_set_viewport',
+    description:
+      'Emulate a viewport size for responsiveness checks (e.g. 390×844 for mobile). Pass width 0 and height 0 to reset to the native stage size.',
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['tab_id', 'width', 'height'],
+      properties: {
+        tab_id: { type: 'string' },
+        width: { type: 'number' },
+        height: { type: 'number' }
+      }
+    },
+    strict: true
   }
 ]
 
@@ -336,6 +469,66 @@ async function executeTool(
       log(session, { kind: 'text', text: output.slice(0, 2000) })
       return output
     }
+    case 'browser_open': {
+      const url = String(input.url ?? '')
+      const result = await agentOpenTab(url)
+      log(session, { kind: 'browser', text: `Opened browser tab → ${url.slice(0, 200)}` })
+      return result
+    }
+    case 'browser_navigate': {
+      const url = String(input.url ?? '')
+      const result = await agentNavigate(String(input.tab_id ?? ''), url)
+      log(session, { kind: 'browser', text: `Navigated → ${url.slice(0, 200)}` })
+      return result
+    }
+    case 'browser_read':
+      return agentReadPage(
+        String(input.tab_id ?? ''),
+        input.selector ? String(input.selector) : undefined
+      )
+    case 'browser_eval':
+      return agentEval(String(input.tab_id ?? ''), String(input.expression ?? ''))
+    case 'browser_click': {
+      const selector = String(input.selector ?? '')
+      const result = await agentClick(String(input.tab_id ?? ''), selector)
+      log(session, { kind: 'browser', text: `Clicked ${selector}` })
+      return result
+    }
+    case 'browser_type': {
+      const selector = String(input.selector ?? '')
+      const result = await agentType(String(input.tab_id ?? ''), selector, String(input.text ?? ''))
+      log(session, { kind: 'browser', text: `Typed into ${selector}` })
+      return result
+    }
+    case 'browser_wait_for':
+      return agentWaitFor(
+        String(input.tab_id ?? ''),
+        String(input.selector ?? ''),
+        typeof input.timeout_ms === 'number' ? input.timeout_ms : 10_000
+      )
+    case 'browser_screenshot': {
+      const path = String(input.path ?? '')
+      if (!path.toLowerCase().endsWith('.png')) return 'error: path must end in .png'
+      const png = await agentCapture(
+        String(input.tab_id ?? ''),
+        input.selector ? String(input.selector) : undefined
+      )
+      const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''
+      if (dir) await createEntry(dir, 'dir')
+      const result = await writeBinaryFile(path, png)
+      if (result.error) return `error: ${result.error}`
+      log(session, { kind: 'screenshot', text: `Screenshot saved: ${path}`, path })
+      return `saved ${path} (${png.length} bytes)`
+    }
+    case 'browser_set_viewport': {
+      const result = agentSetViewport(
+        String(input.tab_id ?? ''),
+        Number(input.width ?? 0),
+        Number(input.height ?? 0)
+      )
+      log(session, { kind: 'browser', text: result })
+      return result
+    }
     default:
       return `error: unknown tool ${name}`
   }
@@ -375,7 +568,10 @@ async function executeTask(session: AgentSession): Promise<void> {
         "You are AGWeb's execution agent, working inside the workspace at " +
         `${session.workspacePath ?? '(no workspace)'} with workspace-scoped tools. ` +
         'Follow the approved plan, keep changes minimal, and end with a short summary ' +
-        'of what you did and how you verified it.',
+        'of what you did and how you verified it. The browser_* tools drive real tabs ' +
+        'in the shell browser the user is watching — use them to verify UI changes ' +
+        '(open the page, interact, assert on the DOM with browser_read/browser_eval, ' +
+        'and capture browser_screenshot evidence).',
       tools: EXEC_TOOLS,
       messages
     } as Parameters<typeof client.beta.messages.stream>[0])
@@ -433,8 +629,10 @@ async function executeTask(session: AgentSession): Promise<void> {
 function mockPlan(task: string): PlanStep[] {
   return [
     { kind: 'edit', title: 'Write AGENT_NOTE.md recording the task', detail: task },
-    { kind: 'command', title: 'Verify by listing the workspace' },
-    { kind: 'verify', title: 'Summarize the result' }
+    { kind: 'inspect', title: 'Open a browser tab on the target page' },
+    { kind: 'verify', title: 'Click the action button and assert the DOM updated' },
+    { kind: 'verify', title: 'Capture screenshot evidence (agent-shot.png)' },
+    { kind: 'command', title: 'Verify by listing the workspace' }
   ]
 }
 
@@ -443,10 +641,39 @@ async function mockExecute(session: AgentSession): Promise<void> {
     path: 'AGENT_NOTE.md',
     content: `# Agent note\n\nTask: ${session.task}\n\nCompleted by the mock agent.\n`
   })
+
+  // Drive the shell browser end to end: open a page, interact, assert on the
+  // DOM, then capture screenshot evidence — the PRD 4.1 verification loop.
+  const html =
+    '<title>Agent Target</title>' +
+    '<h1 id="status">waiting</h1>' +
+    '<button id="go" onclick="document.getElementById(\'status\').textContent=\'clicked-ok\'">Go</button>' +
+    '<input id="name">'
+  const opened = await executeTool(session, 'browser_open', {
+    url: 'data:text/html,' + encodeURIComponent(html)
+  })
+  const tabId = /tabId: (\S+)/.exec(opened)?.[1] ?? ''
+  await executeTool(session, 'browser_wait_for', { tab_id: tabId, selector: '#go' })
+  await executeTool(session, 'browser_click', { tab_id: tabId, selector: '#go' })
+  const status = await executeTool(session, 'browser_read', { tab_id: tabId, selector: '#status' })
+  log(session, {
+    kind: status.includes('clicked-ok') ? 'text' : 'error',
+    text: `DOM assertion: #status is "${status}" (expected "clicked-ok")`
+  })
+  await executeTool(session, 'browser_type', { tab_id: tabId, selector: '#name', text: 'agweb' })
+  const value = await executeTool(session, 'browser_eval', {
+    tab_id: tabId,
+    expression: "document.getElementById('name').value"
+  })
+  log(session, { kind: 'text', text: `Input round-trip: #name reads ${value}` })
+  await executeTool(session, 'browser_set_viewport', { tab_id: tabId, width: 390, height: 700 })
+  await executeTool(session, 'browser_screenshot', { tab_id: tabId, path: 'agent-shot.png' })
+  await executeTool(session, 'browser_set_viewport', { tab_id: tabId, width: 0, height: 0 })
+
   const output = await executeTool(session, 'run_command', { command: 'ls' })
   log(session, {
     kind: 'text',
-    text: `Wrote AGENT_NOTE.md and verified the workspace listing (${output.split('\n').length - 1} lines). Task recorded.`
+    text: `Wrote AGENT_NOTE.md, verified the page interaction in the browser, and listed the workspace (${output.split('\n').length - 1} lines).`
   })
   update(session, { status: 'done' })
   log(session, { kind: 'status', text: 'Task complete.' })

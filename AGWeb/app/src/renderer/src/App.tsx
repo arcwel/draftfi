@@ -25,9 +25,13 @@ export default function App(): React.JSX.Element {
     const offOpen = window.agweb.browser.onOpenTab((url) => {
       useShellStore.getState().newTab(url)
     })
+    const offAdopt = window.agweb.browser.onAdoptTab((tabId) => {
+      useShellStore.getState().adoptBrowserTab(tabId)
+    })
     return () => {
       offState()
       offOpen()
+      offAdopt()
     }
   }, [])
 

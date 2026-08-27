@@ -43,6 +43,12 @@ const api: AgwebApi = {
       const handler = (_event: unknown, url: string): void => listener(url)
       ipcRenderer.on(IpcEvents.browserOpenTab, handler)
       return () => ipcRenderer.removeListener(IpcEvents.browserOpenTab, handler)
+    },
+    onAdoptTab: (listener) => {
+      const handler = (_event: unknown, payload: { tabId: string; url: string }): void =>
+        listener(payload.tabId, payload.url)
+      ipcRenderer.on(IpcEvents.browserAdoptTab, handler)
+      return () => ipcRenderer.removeListener(IpcEvents.browserAdoptTab, handler)
     }
   },
   windows: {

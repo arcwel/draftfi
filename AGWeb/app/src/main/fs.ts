@@ -67,6 +67,18 @@ export async function writeFile(rel: string, content: string): Promise<{ error?:
   }
 }
 
+/** Binary write for agent screenshots and other non-text artifacts. */
+export async function writeBinaryFile(rel: string, data: Buffer): Promise<{ error?: string }> {
+  const full = resolveInWorkspace(rel)
+  if (!full) return { error: 'no workspace' }
+  try {
+    await fsp.writeFile(full, data)
+    return {}
+  } catch (error) {
+    return { error: message(error) }
+  }
+}
+
 export async function createEntry(rel: string, kind: 'file' | 'dir'): Promise<{ error?: string }> {
   const full = resolveInWorkspace(rel)
   if (!full) return { error: 'no workspace' }
