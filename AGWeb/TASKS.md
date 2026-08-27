@@ -52,10 +52,10 @@ Derived from `AGWeb/PRD.md`. Phases are ordered by dependency; tasks within a ph
 
 ## Phase 3 — IDE Core (Editor, Files, Terminal)
 
-- [ ] 3.1 File explorer with create/rename/delete/move and file-watcher refresh
-- [ ] 3.2 Monaco integration: syntax highlighting + IntelliSense for JSON, HTML, CSS, JavaScript/TypeScript, Python
+- [x] 3.1 File explorer: lazy tree of the workspace with create/rename (inline)/delete (confirmed) and recursive-watcher refresh; workspace-scoped path validation in main — move-via-drag still open
+- [x] 3.2 Monaco integration: bundled workers (JSON/CSS/HTML/TS IntelliSense), syntax highlighting incl. Python/Markdown/YAML, shared document models, tabbed open files synced across windows, dirty markers, ⌘S save-to-disk
 - [ ] 3.3 Formatter integration (Prettier for web languages, ruff/black for Python)
-- [ ] 3.4 Integrated terminal (node-pty + xterm.js) with multiple sessions
+- [x] 3.4 Integrated terminal: node-pty sessions in main (in-process when rebuilt for Electron, system-node pty-host fallback otherwise) + xterm.js frontend; sessions keyed by block id survive deck hide/move/detach with scrollback replay; multiple sessions via `+`
 - [ ] 3.5 Diff viewer for reviewing agent-proposed changes before/after apply
 - [ ] 3.6 Search across project (ripgrep-backed)
 

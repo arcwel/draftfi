@@ -23,7 +23,7 @@ export interface AppInfo {
   version: string
   electron: string
   chrome: string
-  platform: NodeJS.Platform
+  platform: string
 }
 
 /** Screen-space rectangle in device-independent pixels. */
@@ -67,7 +67,19 @@ export const IpcChannels = {
   deckClose: 'deck:close',
   deckFocus: 'deck:focus',
   floatSync: 'float:sync',
-  shellBroadcast: 'shell:broadcast'
+  shellBroadcast: 'shell:broadcast',
+  fsList: 'fs:list',
+  fsRead: 'fs:read',
+  fsWrite: 'fs:write',
+  fsCreate: 'fs:create',
+  fsRename: 'fs:rename',
+  fsDelete: 'fs:delete',
+  dialogConfirm: 'dialog:confirm',
+  termCreate: 'term:create',
+  termInput: 'term:input',
+  termResize: 'term:resize',
+  termDispose: 'term:dispose',
+  termAttach: 'term:attach'
 } as const
 
 /** Events pushed from main to the renderer. */
@@ -77,8 +89,16 @@ export const IpcEvents = {
   browserOpenTab: 'event:browser-open-tab',
   shellSync: 'event:shell-sync',
   requestSync: 'event:request-sync',
-  deckWindowClosed: 'event:deck-window-closed'
+  deckWindowClosed: 'event:deck-window-closed',
+  fsChanged: 'event:fs-changed',
+  termData: 'event:term-data',
+  termExit: 'event:term-exit'
 } as const
+
+export interface FsEntry {
+  name: string
+  kind: 'file' | 'dir'
+}
 
 /** The API surface exposed on `window.agweb` by the preload bridge. */
 export interface AgwebApi {
@@ -127,5 +147,30 @@ export interface AgwebApi {
     onRequestSync(listener: () => void): () => void
     /** The detached deck window was closed (by Dock back or the OS). */
     onDeckClosed(listener: () => void): () => void
+  }
+
+  /** Workspace-scoped filesystem (paths relative to the open workspace). */
+  fs: {
+    list(rel: string): Promise<FsEntry[]>
+    read(rel: string): Promise<{ content?: string; error?: string }>
+    write(rel: string, content: string): Promise<{ error?: string }>
+    create(rel: string, kind: 'file' | 'dir'): Promise<{ error?: string }>
+    rename(fromRel: string, toRel: string): Promise<{ error?: string }>
+    remove(rel: string): Promise<{ error?: string }>
+    onChanged(listener: () => void): () => void
+  }
+
+  /** Native confirm dialog (window.confirm is unavailable in Electron). */
+  confirm(message: string): Promise<boolean>
+
+  /** Terminal sessions, keyed by block id; they outlive renderer mounts. */
+  terminal: {
+    create(id: string, cols: number, rows: number): Promise<void>
+    input(id: string, data: string): Promise<void>
+    resize(id: string, cols: number, rows: number): Promise<void>
+    dispose(id: string): Promise<void>
+    attach(id: string): Promise<{ buffer: string; running: boolean }>
+    onData(listener: (id: string, data: string) => void): () => void
+    onExit(listener: (id: string, code: number) => void): () => void
   }
 }

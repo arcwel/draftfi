@@ -15,7 +15,24 @@ export default tseslint.config(
   {
     files: ['scripts/**/*.mjs', 'electron.vite.config.ts'],
     languageOptions: {
-      globals: { process: 'readonly', console: 'readonly', URL: 'readonly' }
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+        URL: 'readonly',
+        setTimeout: 'readonly'
+      }
+    },
+    rules: { '@typescript-eslint/explicit-function-return-type': 'off' }
+  },
+  {
+    files: ['resources/**/*.cjs'],
+    languageOptions: {
+      sourceType: 'commonjs',
+      globals: { require: 'readonly', process: 'readonly', module: 'readonly' }
+    },
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+      '@typescript-eslint/explicit-function-return-type': 'off'
     }
   },
   {

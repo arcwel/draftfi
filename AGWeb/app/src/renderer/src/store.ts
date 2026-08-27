@@ -181,6 +181,11 @@ interface ShellState {
   groups: BlockGroup[]
   rail: RailEntry[]
 
+  /** Open editor documents (workspace-relative paths), shared by all editors. */
+  editorTabs: string[]
+  activeEditorPath: string | null
+  dirtyFiles: Record<string, boolean>
+
   setWorkspace(workspace: WorkspaceInfo | null): void
   setTheme(theme: Theme): void
 
@@ -207,6 +212,10 @@ interface ShellState {
   sendToRail(blockId: string): void
   restoreFromRail(blockId: string): void
   applyPreset(preset: DeckPreset): void
+
+  openFile(path: string): void
+  closeEditorTab(path: string): void
+  setFileDirty(path: string, dirty: boolean): void
 }
 
 const initialTab = makeTab()
@@ -225,6 +234,9 @@ export const useShellStore = create<ShellState>((set) => ({
   blocks: initialDeck.blocks,
   groups: initialDeck.groups,
   rail: initialDeck.rail,
+  editorTabs: [],
+  activeEditorPath: null,
+  dirtyFiles: {},
 
   setWorkspace: (workspace) =>
     set((state) => {
@@ -301,6 +313,7 @@ export const useShellStore = create<ShellState>((set) => ({
 
   closeBlock: (blockId) =>
     set((state) => {
+      if (state.blocks[blockId]?.type === 'terminal') void window.agweb.terminal.dispose(blockId)
       const blocks = { ...state.blocks }
       delete blocks[blockId]
       return {
@@ -405,6 +418,27 @@ export const useShellStore = create<ShellState>((set) => ({
       }
     }),
 
+  openFile: (path) =>
+    set((state) => ({
+      editorTabs: state.editorTabs.includes(path) ? state.editorTabs : [...state.editorTabs, path],
+      activeEditorPath: path
+    })),
+
+  closeEditorTab: (path) =>
+    set((state) => {
+      const editorTabs = state.editorTabs.filter((p) => p !== path)
+      const dirtyFiles = { ...state.dirtyFiles }
+      delete dirtyFiles[path]
+      const activeEditorPath =
+        state.activeEditorPath === path
+          ? (editorTabs[editorTabs.length - 1] ?? null)
+          : state.activeEditorPath
+      return { editorTabs, activeEditorPath, dirtyFiles }
+    }),
+
+  setFileDirty: (path, dirty) =>
+    set((state) => ({ dirtyFiles: { ...state.dirtyFiles, [path]: dirty } })),
+
   applyPreset: (preset) =>
     set((state) => {
       if (preset === 'browsing') return { deckRevealed: false }
@@ -454,7 +488,14 @@ export function applyRemoteState(state: DeckSyncState): void {
 
 export function currentSyncState(): DeckSyncState {
   const s = useShellStore.getState()
-  return { blocks: s.blocks, groups: s.groups, rail: s.rail, deckMode: s.deckMode }
+  return {
+    blocks: s.blocks,
+    groups: s.groups,
+    rail: s.rail,
+    deckMode: s.deckMode,
+    editorTabs: s.editorTabs,
+    activeEditorPath: s.activeEditorPath
+  }
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
@@ -467,13 +508,17 @@ useShellStore.subscribe((state) => {
     lastSlice.blocks !== state.blocks ||
     lastSlice.groups !== state.groups ||
     lastSlice.rail !== state.rail ||
-    lastSlice.deckMode !== state.deckMode
+    lastSlice.deckMode !== state.deckMode ||
+    lastSlice.editorTabs !== state.editorTabs ||
+    lastSlice.activeEditorPath !== state.activeEditorPath
   if (!changed) return
   lastSlice = {
     blocks: state.blocks,
     groups: state.groups,
     rail: state.rail,
-    deckMode: state.deckMode
+    deckMode: state.deckMode,
+    editorTabs: state.editorTabs,
+    activeEditorPath: state.activeEditorPath
   }
   if (!applyingRemote) void window.agweb.windows.broadcastState(lastSlice)
   if (saveTimer) clearTimeout(saveTimer)

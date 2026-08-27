@@ -1,4 +1,4 @@
-import { BrowserWindow, app, ipcMain, nativeTheme, shell } from 'electron'
+import { BrowserWindow, app, dialog, ipcMain, nativeTheme, shell } from 'electron'
 import { join } from 'node:path'
 import { version as appVersion } from '../../package.json'
 import { IpcChannels, IpcEvents } from '@shared/ipc'
@@ -31,6 +31,27 @@ import {
   openDeckWindow,
   syncFloatWindows
 } from './windows'
+import {
+  createEntry,
+  deleteEntry,
+  listDir,
+  readFile,
+  renameEntry,
+  watchWorkspace,
+  writeFile
+} from './fs'
+import {
+  attachTerminal,
+  createTerminal,
+  disposeAllTerminals,
+  disposeTerminal,
+  resizeTerminal,
+  writeTerminal
+} from './terminal'
+import type { WorkspaceInfo } from '@shared/ipc'
+
+// Test/dev hooks: isolate state and open a workspace without the dialog.
+if (process.env.AGWEB_USER_DATA) app.setPath('userData', process.env.AGWEB_USER_DATA)
 
 const MAX_RENDERER_RESTARTS = 3
 
@@ -129,16 +150,22 @@ function registerIpcHandlers(): void {
     }
   })
 
+  const applyWorkspace = (workspace: WorkspaceInfo | null): void => {
+    if (!workspace) return
+    watchWorkspace(workspace.path)
+    broadcast(IpcEvents.workspaceChanged, workspace, null)
+  }
+
   ipcMain.handle(IpcChannels.workspaceOpen, async () => {
     const workspace = await openWorkspaceDialog()
-    if (workspace) broadcast(IpcEvents.workspaceChanged, workspace, null)
+    applyWorkspace(workspace)
     return workspace
   })
 
   ipcMain.handle(IpcChannels.workspaceOpenPath, (_event, path: unknown) => {
     if (typeof path !== 'string') return null
     const workspace = openWorkspacePath(path)
-    if (workspace) broadcast(IpcEvents.workspaceChanged, workspace, null)
+    applyWorkspace(workspace)
     return workspace
   })
 
@@ -212,10 +239,78 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IpcChannels.shellBroadcast, (event, payload: unknown) => {
     broadcast(IpcEvents.shellSync, payload, event.sender.id)
   })
+
+  const str = (v: unknown): string | null => (typeof v === 'string' ? v : null)
+
+  ipcMain.handle(IpcChannels.fsList, (_e, rel: unknown) => listDir(str(rel) ?? ''))
+  ipcMain.handle(IpcChannels.fsRead, (_e, rel: unknown) => readFile(str(rel) ?? ''))
+  ipcMain.handle(IpcChannels.fsWrite, (_e, rel: unknown, content: unknown) => {
+    const r = str(rel)
+    if (r === null || typeof content !== 'string') return { error: 'bad arguments' }
+    return writeFile(r, content)
+  })
+  ipcMain.handle(IpcChannels.fsCreate, (_e, rel: unknown, kind: unknown) => {
+    const r = str(rel)
+    if (r === null || (kind !== 'file' && kind !== 'dir')) return { error: 'bad arguments' }
+    return createEntry(r, kind)
+  })
+  ipcMain.handle(IpcChannels.fsRename, (_e, from: unknown, to: unknown) => {
+    const f = str(from)
+    const t = str(to)
+    if (f === null || t === null) return { error: 'bad arguments' }
+    return renameEntry(f, t)
+  })
+  ipcMain.handle(IpcChannels.fsDelete, (_e, rel: unknown) => {
+    const r = str(rel)
+    if (r === null) return { error: 'bad arguments' }
+    return deleteEntry(r)
+  })
+
+  ipcMain.handle(IpcChannels.dialogConfirm, async (_e, message: unknown) => {
+    if (!mainWindow) return false
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      buttons: ['Cancel', 'OK'],
+      defaultId: 1,
+      cancelId: 0,
+      message: str(message) ?? 'Are you sure?'
+    })
+    return response === 1
+  })
+
+  const num = (v: unknown, fallback: number): number =>
+    typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : fallback
+
+  ipcMain.handle(IpcChannels.termCreate, (_e, id: unknown, cols: unknown, rows: unknown) => {
+    const t = str(id)
+    if (t) createTerminal(t, num(cols, 80), num(rows, 24))
+  })
+  ipcMain.handle(IpcChannels.termInput, (_e, id: unknown, data: unknown) => {
+    const t = str(id)
+    if (t && typeof data === 'string') writeTerminal(t, data)
+  })
+  ipcMain.handle(IpcChannels.termResize, (_e, id: unknown, cols: unknown, rows: unknown) => {
+    const t = str(id)
+    if (t) resizeTerminal(t, num(cols, 80), num(rows, 24))
+  })
+  ipcMain.handle(IpcChannels.termDispose, (_e, id: unknown) => {
+    const t = str(id)
+    if (t) disposeTerminal(t)
+  })
+  ipcMain.handle(IpcChannels.termAttach, (_e, id: unknown) => {
+    const t = str(id)
+    return t ? attachTerminal(t) : { buffer: '', running: false }
+  })
 }
 
 app.whenReady().then(() => {
   registerIpcHandlers()
+
+  if (process.env.AGWEB_WORKSPACE) {
+    const workspace = openWorkspacePath(process.env.AGWEB_WORKSPACE)
+    if (workspace) watchWorkspace(workspace.path)
+  }
+
   createMainWindow()
 
   app.on('activate', () => {
@@ -224,5 +319,6 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
+  disposeAllTerminals()
   if (process.platform !== 'darwin') app.quit()
 })

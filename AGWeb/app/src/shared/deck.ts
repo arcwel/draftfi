@@ -35,4 +35,7 @@ export interface DeckSyncState {
   groups: BlockGroup[]
   rail: RailEntry[]
   deckMode: DeckMode
+  /** Open editor documents (workspace-relative paths) and the focused one. */
+  editorTabs: string[]
+  activeEditorPath: string | null
 }

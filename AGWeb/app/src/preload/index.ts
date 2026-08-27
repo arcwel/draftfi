@@ -65,6 +65,39 @@ const api: AgwebApi = {
       ipcRenderer.on(IpcEvents.deckWindowClosed, handler)
       return () => ipcRenderer.removeListener(IpcEvents.deckWindowClosed, handler)
     }
+  },
+  fs: {
+    list: (rel) => ipcRenderer.invoke(IpcChannels.fsList, rel),
+    read: (rel) => ipcRenderer.invoke(IpcChannels.fsRead, rel),
+    write: (rel, content) => ipcRenderer.invoke(IpcChannels.fsWrite, rel, content),
+    create: (rel, kind) => ipcRenderer.invoke(IpcChannels.fsCreate, rel, kind),
+    rename: (fromRel, toRel) => ipcRenderer.invoke(IpcChannels.fsRename, fromRel, toRel),
+    remove: (rel) => ipcRenderer.invoke(IpcChannels.fsDelete, rel),
+    onChanged: (listener) => {
+      const handler = (): void => listener()
+      ipcRenderer.on(IpcEvents.fsChanged, handler)
+      return () => ipcRenderer.removeListener(IpcEvents.fsChanged, handler)
+    }
+  },
+  confirm: (message) => ipcRenderer.invoke(IpcChannels.dialogConfirm, message),
+  terminal: {
+    create: (id, cols, rows) => ipcRenderer.invoke(IpcChannels.termCreate, id, cols, rows),
+    input: (id, data) => ipcRenderer.invoke(IpcChannels.termInput, id, data),
+    resize: (id, cols, rows) => ipcRenderer.invoke(IpcChannels.termResize, id, cols, rows),
+    dispose: (id) => ipcRenderer.invoke(IpcChannels.termDispose, id),
+    attach: (id) => ipcRenderer.invoke(IpcChannels.termAttach, id),
+    onData: (listener) => {
+      const handler = (_e: unknown, payload: { id: string; data: string }): void =>
+        listener(payload.id, payload.data)
+      ipcRenderer.on(IpcEvents.termData, handler)
+      return () => ipcRenderer.removeListener(IpcEvents.termData, handler)
+    },
+    onExit: (listener) => {
+      const handler = (_e: unknown, payload: { id: string; code: number }): void =>
+        listener(payload.id, payload.code)
+      ipcRenderer.on(IpcEvents.termExit, handler)
+      return () => ipcRenderer.removeListener(IpcEvents.termExit, handler)
+    }
   }
 }
 
