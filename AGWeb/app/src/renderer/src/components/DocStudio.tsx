@@ -9,6 +9,7 @@ import 'katex/dist/katex.min.css'
 import { useShellStore } from '@/store'
 import { ensureModel, monaco } from '@/monaco'
 import { JsonTree } from '@/components/JsonTree'
+import { JsonGraph } from '@/components/JsonGraph'
 import { CsvTable } from '@/components/CsvTable'
 import { load as parseYaml } from 'js-yaml'
 import { parse as parseToml } from 'smol-toml'
@@ -36,7 +37,7 @@ const sanitizeSchema = {
 
 export function DocStudio({ path }: { path: string }): React.JSX.Element {
   const workspacePath = useShellStore((s) => s.workspace?.path ?? null)
-  const [mode, setMode] = useState<'styled' | 'source'>('styled')
+  const [mode, setMode] = useState<'styled' | 'graph' | 'source'>('styled')
   const [content, setContent] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -66,6 +67,7 @@ export function DocStudio({ path }: { path: string }): React.JSX.Element {
   const ext = path.split('.').pop()?.toLowerCase() ?? ''
   const name = path.split('/').pop() ?? path
   const isMarkdown = ext === 'md' || ext === 'markdown'
+  const isTreeDoc = ext === 'json' || ext === 'yaml' || ext === 'yml' || ext === 'toml'
 
   const pickTheme = (theme: DocTheme): void => {
     setDocTheme(theme)
@@ -116,7 +118,7 @@ export function DocStudio({ path }: { path: string }): React.JSX.Element {
     setNotice(result.error ?? (result.path ? `Exported ${result.path}` : null))
   }
 
-  const segment = (id: 'styled' | 'source', label: string): React.JSX.Element => (
+  const segment = (id: 'styled' | 'graph' | 'source', label: string): React.JSX.Element => (
     <button
       onClick={() => setMode(id)}
       className={`rounded-md px-3 py-1 text-xs font-semibold ${
@@ -154,6 +156,7 @@ export function DocStudio({ path }: { path: string }): React.JSX.Element {
           {menuButton('export', 'Export')}
           <div className="flex items-center gap-1 rounded-lg border border-slate-200 p-0.5 dark:border-slate-700">
             {segment('styled', 'Styled')}
+            {isTreeDoc && segment('graph', 'Graph')}
             {segment('source', 'Source')}
           </div>
           <button
@@ -208,6 +211,9 @@ export function DocStudio({ path }: { path: string }): React.JSX.Element {
         {error && <div className="p-6 text-sm text-red-500">{error}</div>}
         {!error && content === null && <div className="p-6 text-sm text-slate-500">Loading…</div>}
         {!error && content !== null && mode === 'source' && <SourcePane path={path} />}
+        {!error && content !== null && mode === 'graph' && isTreeDoc && (
+          <GraphPane ext={ext} content={content} />
+        )}
         {!error && content !== null && mode === 'styled' && (
           <StyledView ext={ext} content={content} docTheme={docTheme} />
         )}
@@ -371,4 +377,29 @@ function SourcePane({ path }: { path: string }): React.JSX.Element {
   }, [theme])
 
   return <div ref={containerRef} className="h-full" />
+}
+
+/** Parse a tree-type document and hand it to the graph, or show the error. */
+function GraphPane({ ext, content }: { ext: string; content: string }): React.JSX.Element {
+  let data: unknown
+  let parseError: unknown = null
+  try {
+    data =
+      ext === 'json'
+        ? (JSON.parse(content) as unknown)
+        : ext === 'toml'
+          ? parseToml(content)
+          : parseYaml(content)
+  } catch (caught) {
+    parseError = caught
+  }
+  if (parseError !== null) {
+    return (
+      <div className="p-6 text-sm">
+        <div className="font-semibold text-red-500">This file doesn&apos;t parse as {ext}.</div>
+        <div className="mt-2 font-mono text-xs text-slate-500">{String(parseError)}</div>
+      </div>
+    )
+  }
+  return <JsonGraph data={data} />
 }

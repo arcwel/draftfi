@@ -77,7 +77,7 @@ Build our own thin viewer shell composed from open-source rendering primitives (
 - [x] 5.3 Markdown extras: code-block highlighting (highlight.js via rehype-highlight; Shiki noted as an upgrade path), Mermaid diagrams (lazy-loaded, securityLevel strict), KaTeX math — all downstream of the sanitize pass
 - [x] 5.4 Sanitization pipeline (rehype-sanitize) so untrusted markdown/HTML cannot script in the host app
 - [x] 5.5 JSON tree inspector: collapsible tree with search (filters to matching subtrees), type badges (object/array counts), value previews, hover copy-as-path
-- [ ] 5.6 Interactive node-graph view for JSON/YAML/XML/CSV (evaluate embedding JSON Crack's Apache-2.0 graph engine vs. building on React Flow)
+- [x] 5.6 Interactive node-graph view for JSON/YAML/TOML: own lightweight SVG engine (~250 lines, no graph deps) — containers as nodes listing scalar fields, left-to-right tree layout, drag-pan, wheel-zoom, click-to-collapse subtrees, 1200-node truncation notice; Graph segment in the Studio toggle
 - [x] 5.7 CSV/TSV renderer: PapaParse → sortable (numeric-aware), filterable table with sticky header
 - [x] 5.8 YAML/TOML support: js-yaml / smol-toml parse, routed through the JSON tree (graph view pending 5.6)
 - [x] 5.9 Theming: Default / Serif / Compact document themes applied live, saved per workspace — free-form custom themes can layer on later

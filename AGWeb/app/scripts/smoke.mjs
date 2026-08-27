@@ -143,6 +143,12 @@ try {
   await window.waitForSelector('text=tags', { timeout: 15000 })
   await window.waitForSelector('text=array') // the tags node's type badge (array·2)
 
+  // Node-graph view: root and child container render as connected nodes.
+  await window.click('button:has-text("Graph")')
+  await window.waitForSelector('.json-graph svg', { timeout: 10000 })
+  await window.waitForSelector('.json-graph text:has-text("tags")')
+  await window.click('button:has-text("Styled")')
+
   // Format conversion: JSON → YAML writes a sibling file and opens it.
   await window.click('button:has-text("Convert")')
   await window.click('button:has-text("to .yaml")')
