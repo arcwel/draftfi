@@ -20,6 +20,13 @@ This platform is a unified, agent-first desktop workspace that merges an autonom
 | **Presentation Engine** | Reveal.js | <https://revealjs.com> |
 | **Styling Framework** | Tailwind CSS | <https://tailwindcss.com> |
 | **Cross-Window Comm** | Postmate / PostMessage API | <https://github.com/dollarshaveclub/postmate> |
+| **Markdown Rendering** | react-markdown (remark/rehype) | <https://github.com/remarkjs/react-markdown> |
+| **Markdown Styling** | @uiw/react-markdown-preview / github-markdown-css | <https://github.com/uiwjs/react-markdown-preview> |
+| **Code Highlighting** | Shiki | <https://shiki.style> |
+| **Diagrams** | Mermaid | <https://mermaid.js.org> |
+| **JSON Tree View** | @uiw/react-json-view | <https://github.com/uiwjs/react-json-view> |
+| **Data Graph View** | JSON Crack (Apache 2.0) | <https://github.com/AykutSarac/jsoncrack.com> |
+| **CSV Parsing** | PapaParse | <https://www.papaparse.com> |
 
 ## 3. Key Features & Functional Requirements
 
@@ -34,6 +41,17 @@ This platform is a unified, agent-first desktop workspace that merges an autonom
 - **Full Chromium Capabilities:** Integrated browser tab supporting full extensions, standard navigation, DevTools, and native rendering.
 - **Zero-Friction Embedding:** Integrated proxy layer to strip frame-busting headers (X-Frame-Options, strict CSPs) and resolve cross-origin issues for development previews.
 - **Autonomous Browser Control:** Direct agent hooks to navigate pages, complete forms, trigger DOM events, and validate UI responsiveness.
+
+### Document Studio — Stylized Rendering of Structured Files
+
+A standout browser-integrated design tool that turns raw JSON, Markdown, and similar structured files into human-readable, stylized documents.
+
+- **In-Browser File Rendering:** Opening or navigating to a `.md`, `.json`, `.yaml`, `.csv`, `.toml`, or `.xml` file in the integrated browser renders a styled document view instead of raw text, with one-click toggle back to source (Monaco).
+- **Markdown Studio:** GitHub-flavored rendering with theme presets, Shiki syntax-highlighted code blocks, Mermaid diagrams, math (KaTeX), and dark/light modes; sanitized rendering pipeline for untrusted content.
+- **JSON/Data Studio:** Collapsible tree inspector with search, type badges, and path copying, plus an interactive node-graph visualization (JSON Crack-style) for JSON, YAML, XML, and CSV; format conversion between these types.
+- **Style & Theming Controls:** User-selectable document themes (typography, spacing, palette) applied live; custom themes savable per workspace.
+- **Export:** Render any styled view to standalone HTML, PDF, or image for sharing.
+- **Build Strategy:** Own thin viewer shell (file-type detection, theming, layout, export) composed from mature open-source rendering primitives (react-markdown/remark, Shiki, Mermaid, @uiw/react-json-view, PapaParse; JSON Crack under Apache 2.0 for graph view) — no third-party app embedding.
 
 ### Integrated Development Environment (IDE)
 
