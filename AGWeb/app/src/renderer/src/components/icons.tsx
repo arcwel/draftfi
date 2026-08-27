@@ -148,3 +148,71 @@ export function GlobeIcon({ size = 14, className }: IconProps): React.JSX.Elemen
     </svg>
   )
 }
+
+export function MinusIcon({ size = 13, className }: IconProps): React.JSX.Element {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      className={className}
+    >
+      <path d="M5 12h14" />
+    </svg>
+  )
+}
+
+export function BlockTypeIcon({
+  type,
+  size = 15,
+  className
+}: IconProps & { type: 'editor' | 'files' | 'terminal' | 'agents' | 'logs' }): React.JSX.Element {
+  const common = {
+    width: size,
+    height: size,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 2,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    className
+  }
+  switch (type) {
+    case 'editor':
+      return (
+        <svg {...common}>
+          <path d="M8 6l-5 6 5 6M16 6l5 6-5 6" />
+        </svg>
+      )
+    case 'files':
+      return (
+        <svg {...common}>
+          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+        </svg>
+      )
+    case 'terminal':
+      return (
+        <svg {...common}>
+          <path d="M5 8l5 4-5 4M12 17h7" />
+        </svg>
+      )
+    case 'agents':
+      return (
+        <svg {...common}>
+          <rect x="5" y="8" width="14" height="11" rx="2" />
+          <path d="M12 8V4M9 13h.01M15 13h.01" />
+        </svg>
+      )
+    case 'logs':
+      return (
+        <svg {...common}>
+          <path d="M4 6h16M4 12h16M4 18h10" />
+        </svg>
+      )
+  }
+}

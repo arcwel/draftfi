@@ -1,6 +1,12 @@
 import { useState } from 'react'
-import { useShellStore } from '@/store'
+import { useShellStore, type DeckPreset } from '@/store'
 import { BackIcon, CloseIcon, DeckIcon, ForwardIcon, ReloadIcon } from '@/components/icons'
+
+const PRESETS: { id: DeckPreset; label: string; hint: string }[] = [
+  { id: 'browsing', label: 'Browsing', hint: 'Deck hidden — just the web' },
+  { id: 'building', label: 'Building', hint: 'Editor & files beside the page' },
+  { id: 'debugging', label: 'Debugging', hint: 'Terminals, logs & agents forward' }
+]
 
 /** Turn address-bar input into a navigable URL (or a search query). */
 export function toNavigableUrl(input: string): string | null {
@@ -29,8 +35,10 @@ export function Toolbar(): React.JSX.Element {
   const state = useShellStore((s) => s.browserStates[s.activeTabId])
   const deckRevealed = useShellStore((s) => s.deckRevealed)
   const toggleDeck = useShellStore((s) => s.toggleDeck)
+  const applyPreset = useShellStore((s) => s.applyPreset)
   const [urlInput, setUrlInput] = useState('')
   const [editing, setEditing] = useState(false)
+  const [presetsOpen, setPresetsOpen] = useState(false)
 
   const liveUrl = state?.url && state.url !== 'about:blank' ? state.url : ''
   const displayedUrl = editing ? urlInput : liveUrl
@@ -114,6 +122,33 @@ export function Toolbar(): React.JSX.Element {
           ⌘D
         </span>
       </button>
+
+      <div className="relative">
+        <button
+          onClick={() => setPresetsOpen((o) => !o)}
+          className="flex h-8 items-center rounded-lg border border-slate-300 px-2.5 text-xs font-semibold text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+          aria-label="Layout presets"
+        >
+          Layout ▾
+        </button>
+        {presetsOpen && (
+          <div className="absolute right-0 top-9 z-50 w-60 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-[#0e1420]">
+            {PRESETS.map((preset) => (
+              <button
+                key={preset.id}
+                onClick={() => {
+                  applyPreset(preset.id)
+                  setPresetsOpen(false)
+                }}
+                className="flex w-full flex-col gap-0.5 px-3.5 py-2.5 text-left hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <span className="text-xs font-semibold">{preset.label}</span>
+                <span className="text-[11px] text-slate-500">{preset.hint}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

@@ -9,6 +9,7 @@ import { useShortcut } from '@/shortcuts'
 
 export default function App(): React.JSX.Element {
   const deckRevealed = useShellStore((s) => s.deckRevealed)
+  const hasRail = useShellStore((s) => s.rail.length > 0)
   const { toggleDeck, newTab, closeTab } = useShellStore()
   const setWorkspace = useShellStore((s) => s.setWorkspace)
   const setTheme = useShellStore((s) => s.setTheme)
@@ -60,7 +61,7 @@ export default function App(): React.JSX.Element {
     <div className="flex h-full flex-col bg-slate-100 text-slate-900 dark:bg-[#0b0f14] dark:text-slate-100">
       <TabStrip />
       <Toolbar />
-      <div className={`workspace ${deckRevealed ? 'revealed' : ''}`}>
+      <div className={`workspace ${deckRevealed ? 'revealed' : ''} ${hasRail ? 'has-rail' : ''}`}>
         <Stage />
         <Deck />
       </div>

@@ -15,6 +15,7 @@ export interface BrowserTab {
 
 export type BlockType = 'editor' | 'files' | 'terminal' | 'agents' | 'logs'
 export type DeckZone = 'right' | 'bottom'
+export type DeckPreset = 'browsing' | 'building' | 'debugging'
 
 /** One instance of a dev feature. Blocks are peers: any type can have many. */
 export interface BlockInstance {
@@ -31,6 +32,18 @@ export interface BlockGroup {
   activeBlockId: string
 }
 
+/** A block collapsed to the rail, remembering where to restore it. */
+export interface RailEntry {
+  blockId: string
+  prevZone: DeckZone
+}
+
+/** Where a dragged block or group is dropped. */
+export type DropTarget =
+  | { kind: 'stack'; groupId: string }
+  | { kind: 'before'; groupId: string }
+  | { kind: 'zone'; zone: DeckZone }
+
 export const BLOCK_LABELS: Record<BlockType, string> = {
   editor: 'Editor',
   files: 'Files',
@@ -40,8 +53,10 @@ export const BLOCK_LABELS: Record<BlockType, string> = {
 }
 
 /** Terminals are always numbered (Terminal 1, Terminal 2); others only from 2. */
-const blockCounts: Partial<Record<BlockType, number>> = {}
+let blockCounts: Partial<Record<BlockType, number>> = {}
 let nextBlockId = 1
+let nextGroupId = 1
+
 function makeBlock(type: BlockType): BlockInstance {
   const n = (blockCounts[type] = (blockCounts[type] ?? 0) + 1)
   const numbered = type === 'terminal' || n > 1
@@ -52,17 +67,27 @@ function makeBlock(type: BlockType): BlockInstance {
   }
 }
 
+function makeGroup(zone: DeckZone, members: BlockInstance[]): BlockGroup {
+  return {
+    id: `group-${nextGroupId++}`,
+    zone,
+    blockIds: members.map((b) => b.id),
+    activeBlockId: members[members.length - 1]?.id ?? ''
+  }
+}
+
 let nextTabId = 1
 function makeTab(initialUrl?: string): BrowserTab {
   return { id: `tab-${nextTabId++}`, title: 'New Tab', initialUrl, hasContent: false }
 }
 
-let nextGroupId = 1
-function makeGroup(zone: DeckZone, block: BlockInstance): BlockGroup {
-  return { id: `group-${nextGroupId++}`, zone, blockIds: [block.id], activeBlockId: block.id }
+interface DeckLayout {
+  blocks: Record<string, BlockInstance>
+  groups: BlockGroup[]
+  rail: RailEntry[]
 }
 
-function defaultDeck(): { blocks: Record<string, BlockInstance>; groups: BlockGroup[] } {
+function defaultDeck(): DeckLayout {
   const editor = makeBlock('editor')
   const files = makeBlock('files')
   const terminal = makeBlock('terminal')
@@ -75,12 +100,75 @@ function defaultDeck(): { blocks: Record<string, BlockInstance>; groups: BlockGr
       [agents.id]: agents
     },
     groups: [
-      makeGroup('right', editor),
-      makeGroup('right', files),
-      makeGroup('bottom', terminal),
-      makeGroup('bottom', agents)
-    ]
+      makeGroup('right', [editor]),
+      makeGroup('right', [files]),
+      makeGroup('bottom', [terminal]),
+      makeGroup('bottom', [agents])
+    ],
+    rail: []
   }
+}
+
+/* ---- Per-project layout persistence (localStorage) ---- */
+
+interface LayoutSnapshot extends DeckLayout {
+  counters: {
+    nextBlockId: number
+    nextGroupId: number
+    blockCounts: Partial<Record<BlockType, number>>
+  }
+}
+
+const layoutKey = (workspacePath: string | null): string =>
+  `agweb.layout:${workspacePath ?? 'default'}`
+
+function loadLayout(workspacePath: string | null): DeckLayout | null {
+  try {
+    const raw = localStorage.getItem(layoutKey(workspacePath))
+    if (!raw) return null
+    const snap = JSON.parse(raw) as LayoutSnapshot
+    if (!snap.groups || !snap.blocks) return null
+    nextBlockId = Math.max(nextBlockId, snap.counters?.nextBlockId ?? 1)
+    nextGroupId = Math.max(nextGroupId, snap.counters?.nextGroupId ?? 1)
+    blockCounts = { ...blockCounts, ...snap.counters?.blockCounts }
+    return { blocks: snap.blocks, groups: snap.groups, rail: snap.rail ?? [] }
+  } catch {
+    return null
+  }
+}
+
+export function saveLayout(state: {
+  workspace: WorkspaceInfo | null
+  blocks: Record<string, BlockInstance>
+  groups: BlockGroup[]
+  rail: RailEntry[]
+}): void {
+  try {
+    const snap: LayoutSnapshot = {
+      blocks: state.blocks,
+      groups: state.groups,
+      rail: state.rail,
+      counters: { nextBlockId, nextGroupId, blockCounts }
+    }
+    localStorage.setItem(layoutKey(state.workspace?.path ?? null), JSON.stringify(snap))
+  } catch {
+    // storage unavailable — layout just won't persist
+  }
+}
+
+/* ---- Group surgery helpers (pure) ---- */
+
+/** Remove a block from whichever group holds it; dissolve emptied groups. */
+function withoutBlock(groups: BlockGroup[], blockId: string): BlockGroup[] {
+  return groups
+    .map((g) => {
+      if (!g.blockIds.includes(blockId)) return g
+      const blockIds = g.blockIds.filter((id) => id !== blockId)
+      const activeBlockId =
+        g.activeBlockId === blockId ? (blockIds[blockIds.length - 1] ?? '') : g.activeBlockId
+      return { ...g, blockIds, activeBlockId }
+    })
+    .filter((g) => g.blockIds.length > 0)
 }
 
 interface ShellState {
@@ -94,6 +182,7 @@ interface ShellState {
   deckRevealed: boolean
   blocks: Record<string, BlockInstance>
   groups: BlockGroup[]
+  rail: RailEntry[]
 
   setWorkspace(workspace: WorkspaceInfo | null): void
   setTheme(theme: Theme): void
@@ -109,10 +198,18 @@ interface ShellState {
   /** Open another instance of `type` as a new tab in `groupId`. */
   addBlockToGroup(groupId: string, type: BlockType): void
   closeBlock(blockId: string): void
+  /** Drag-and-drop: move one block (tab) to a target. */
+  moveBlock(blockId: string, target: DropTarget): void
+  /** Drag-and-drop: move a whole group (stack) to a target. */
+  moveGroup(groupId: string, target: DropTarget): void
+  /** Collapse a block to the rail; restore puts it back in its old zone. */
+  sendToRail(blockId: string): void
+  restoreFromRail(blockId: string): void
+  applyPreset(preset: DeckPreset): void
 }
 
 const initialTab = makeTab()
-const initialDeck = defaultDeck()
+const initialDeck = loadLayout(null) ?? defaultDeck()
 
 export const useShellStore = create<ShellState>((set) => ({
   workspace: null,
@@ -125,8 +222,15 @@ export const useShellStore = create<ShellState>((set) => ({
   deckRevealed: false,
   blocks: initialDeck.blocks,
   groups: initialDeck.groups,
+  rail: initialDeck.rail,
 
-  setWorkspace: (workspace) => set({ workspace }),
+  setWorkspace: (workspace) =>
+    set((state) => {
+      if (workspace?.path === state.workspace?.path) return { workspace }
+      const layout = loadLayout(workspace?.path ?? null)
+      return layout ? { workspace, ...layout } : { workspace }
+    }),
+
   setTheme: (theme) => set({ theme }),
 
   newTab: (initialUrl) => {
@@ -193,18 +297,160 @@ export const useShellStore = create<ShellState>((set) => ({
     set((state) => {
       const blocks = { ...state.blocks }
       delete blocks[blockId]
-      const groups = state.groups
-        .map((g) => {
-          if (!g.blockIds.includes(blockId)) return g
-          const blockIds = g.blockIds.filter((id) => id !== blockId)
-          const activeBlockId =
-            g.activeBlockId === blockId ? (blockIds[blockIds.length - 1] ?? '') : g.activeBlockId
-          return { ...g, blockIds, activeBlockId }
-        })
-        .filter((g) => g.blockIds.length > 0)
-      return { blocks, groups }
+      return {
+        blocks,
+        groups: withoutBlock(state.groups, blockId),
+        rail: state.rail.filter((r) => r.blockId !== blockId)
+      }
+    }),
+
+  moveBlock: (blockId, target) =>
+    set((state) => {
+      const source = state.groups.find((g) => g.blockIds.includes(blockId))
+      if (!source) return {}
+      if (target.kind === 'stack' && target.groupId === source.id) return {}
+
+      let groups = withoutBlock(state.groups, blockId)
+      if (target.kind === 'stack') {
+        groups = groups.map((g) =>
+          g.id === target.groupId
+            ? { ...g, blockIds: [...g.blockIds, blockId], activeBlockId: blockId }
+            : g
+        )
+        // Stack target dissolved with the removal (source == target edge): fall
+        // back to a fresh group in the source zone.
+        if (!groups.some((g) => g.blockIds.includes(blockId))) {
+          groups = [
+            ...groups,
+            { ...makeGroup(source.zone, []), blockIds: [blockId], activeBlockId: blockId }
+          ]
+        }
+      } else if (target.kind === 'before') {
+        const index = groups.findIndex((g) => g.id === target.groupId)
+        const zone = groups[index]?.zone ?? source.zone
+        const fresh = { ...makeGroup(zone, []), blockIds: [blockId], activeBlockId: blockId }
+        if (index < 0) groups = [...groups, fresh]
+        else groups = [...groups.slice(0, index), fresh, ...groups.slice(index)]
+      } else {
+        // Splitting a single-block group into its own zone is a no-op move.
+        if (source.blockIds.length === 1 && source.zone === target.zone) return {}
+        groups = [
+          ...groups,
+          { ...makeGroup(target.zone, []), blockIds: [blockId], activeBlockId: blockId }
+        ]
+      }
+      return { groups }
+    }),
+
+  moveGroup: (groupId, target) =>
+    set((state) => {
+      const source = state.groups.find((g) => g.id === groupId)
+      if (!source) return {}
+      if (target.kind === 'stack') {
+        if (target.groupId === groupId) return {}
+        const groups = state.groups
+          .filter((g) => g.id !== groupId)
+          .map((g) =>
+            g.id === target.groupId
+              ? {
+                  ...g,
+                  blockIds: [...g.blockIds, ...source.blockIds],
+                  activeBlockId: source.activeBlockId
+                }
+              : g
+          )
+        return { groups }
+      }
+      if (target.kind === 'before') {
+        if (target.groupId === groupId) return {}
+        const rest = state.groups.filter((g) => g.id !== groupId)
+        const index = rest.findIndex((g) => g.id === target.groupId)
+        if (index < 0) return {}
+        const moved = { ...source, zone: rest[index].zone }
+        return { groups: [...rest.slice(0, index), moved, ...rest.slice(index)] }
+      }
+      if (source.zone === target.zone) {
+        // Append to the end of its own zone (reorder to last).
+        const rest = state.groups.filter((g) => g.id !== groupId)
+        return { groups: [...rest, source] }
+      }
+      return {
+        groups: [...state.groups.filter((g) => g.id !== groupId), { ...source, zone: target.zone }]
+      }
+    }),
+
+  sendToRail: (blockId) =>
+    set((state) => {
+      const source = state.groups.find((g) => g.blockIds.includes(blockId))
+      if (!source) return {}
+      return {
+        groups: withoutBlock(state.groups, blockId),
+        rail: [...state.rail, { blockId, prevZone: source.zone }]
+      }
+    }),
+
+  restoreFromRail: (blockId) =>
+    set((state) => {
+      const entry = state.rail.find((r) => r.blockId === blockId)
+      if (!entry) return {}
+      return {
+        rail: state.rail.filter((r) => r.blockId !== blockId),
+        groups: [
+          ...state.groups,
+          { ...makeGroup(entry.prevZone, []), blockIds: [blockId], activeBlockId: blockId }
+        ]
+      }
+    }),
+
+  applyPreset: (preset) =>
+    set((state) => {
+      if (preset === 'browsing') return { deckRevealed: false }
+
+      const blocks = { ...state.blocks }
+      const ofType = (type: BlockType): BlockInstance[] =>
+        Object.values(blocks).filter((b) => b.type === type)
+      const need = (type: BlockType): BlockInstance[] => {
+        const existing = ofType(type)
+        if (existing.length > 0) return existing
+        const fresh = makeBlock(type)
+        blocks[fresh.id] = fresh
+        return [fresh]
+      }
+
+      const groups =
+        preset === 'building'
+          ? [
+              makeGroup('right', need('editor')),
+              makeGroup('right', need('files')),
+              makeGroup('bottom', need('terminal')),
+              makeGroup('bottom', need('agents'))
+            ]
+          : [
+              makeGroup('right', need('editor')),
+              makeGroup('right', need('files')),
+              makeGroup('bottom', [...need('terminal'), ...need('logs')]),
+              makeGroup('bottom', need('agents'))
+            ]
+      return { blocks, groups, rail: [], deckRevealed: true }
     })
 }))
+
+// Persist the deck layout (debounced) whenever it changes.
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+let lastLayout: { blocks: unknown; groups: unknown; rail: unknown } | null = null
+useShellStore.subscribe((state) => {
+  if (
+    lastLayout &&
+    lastLayout.blocks === state.blocks &&
+    lastLayout.groups === state.groups &&
+    lastLayout.rail === state.rail
+  ) {
+    return
+  }
+  lastLayout = { blocks: state.blocks, groups: state.groups, rail: state.rail }
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => saveLayout(useShellStore.getState()), 400)
+})
 
 function hostOf(url: string): string | null {
   try {

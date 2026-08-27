@@ -42,11 +42,11 @@ Derived from `AGWeb/PRD.md`. Phases are ordered by dependency; tasks within a ph
 - [x] 2B.1 Browser-only default mode: pure browser chrome (tab strip + toolbar + Deck button), start page on empty tabs, no dev UI visible — old sidebar/center-tabs/status-bar shell removed
 - [x] 2B.2 Deck reveal/hide animation (`⌘D` / Deck button): stage retreat + staggered block entrance per DESIGN.md (0.55s, 70/140ms offsets); WebContentsView bounds streamed each animation frame via ResizeObserver, native corner radius synced to the stage frame
 - [x] 2B.3 Block system: independent block instances in groups with header (grip, tabs, `+`, float placeholder, close) — edge resize still open
-- [ ] 2B.4 Drag-and-drop rearrangement between right column, bottom dock, and floating; drop-zone highlighting; drag a tab out to split a stack
-- [ ] 2B.5 Rail: collapse blocks to an icon strip on the window edge; restore in place
-- [ ] 2B.6 Layout presets (Browsing / Building / Debugging) + per-project layout persistence
-- [ ] 2B.7 Floating glass block rendering (translucent, blurred) over the page
-- [x] 2B.8 Tabbed stacks (structure): groups are tabbed stacks; `+` opens a new instance into the group; closing the last tab removes the group — drag-to-stack/split arrives with 2B.4
+- [x] 2B.4 Drag-and-drop rearrangement: drag tabs (blocks) or grips (whole stacks); drop on a header to stack, on a group to insert before it, on zone space to append/split; drop targets highlight — floating drops arrive with 2B.7/2B.10
+- [x] 2B.5 Rail: collapse blocks to an icon strip on the right edge (stage/columns shift to make room); one click restores to the block's previous zone
+- [x] 2B.6 Layout presets (Browsing / Building / Debugging) via the toolbar Layout menu + per-project layout persistence (localStorage keyed by workspace path, debounced saves, restored on project switch)
+- [ ] 2B.7 Floating glass block rendering over the page — requires per-block child windows since the native browser view paints above renderer DOM; build together with 2B.10's multi-window state sync
+- [x] 2B.8 Tabbed stacks: groups are tabbed stacks; `+` opens a new instance into the group; drag a tab onto a header to stack, drag it out to split; closing the last tab removes the group
 - [x] 2B.9 Multiple instances per block type (Terminal 1/2, Editor 2…); instance lifecycle + naming
 - [ ] 2B.10 Detached mode: pop the whole deck out as a standalone IDE window (second BrowserWindow sharing the main-process store); browser reverts to pure browsing; "Dock back" re-merges with layout restored
 

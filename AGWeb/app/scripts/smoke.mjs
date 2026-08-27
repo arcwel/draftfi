@@ -34,8 +34,28 @@ try {
   await window.click('button[aria-label="New terminal"]')
   await window.waitForSelector('text=Terminal 2')
 
-  await window.waitForTimeout(700) // let the reveal transition settle
+  // Layout preset: Debugging stacks terminals with a fresh Logs block.
+  await window.click('button:has-text("Layout")')
+  await window.click('button:has-text("Debugging")')
+  await window.waitForSelector('button:has-text("Logs")')
+
+  // Drag-and-drop: drag the Logs tab onto the Agents group header to stack it.
+  const agentsHeader = window
+    .locator('[data-deck-header]')
+    .filter({ has: window.locator('button', { hasText: 'Agents' }) })
+  await window.locator('button', { hasText: 'Logs' }).first().dragTo(agentsHeader.first())
+  const stacked = agentsHeader.filter({ has: window.locator('button', { hasText: 'Logs' }) })
+  await stacked.first().waitFor({ timeout: 5000 })
+
+  // Rail: collapse the stacked Logs block to the rail, then restore it.
+  await window.click('button[aria-label="Send Logs to rail"]')
+  await window.waitForSelector('button[aria-label="Restore Logs"]')
+
+  await window.waitForTimeout(700) // let transitions settle
   await window.screenshot({ path: screenshotPath })
+
+  await window.click('button[aria-label="Restore Logs"]')
+  await window.waitForSelector('button:has-text("Logs")')
 
   // Hide the deck again — back to pure browsing.
   await window.keyboard.press('ControlOrMeta+d')
