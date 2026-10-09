@@ -36,3 +36,8 @@ DraftFi-*.zip
 .idea/
 .vscode/
 *.log
+
+# Release download-count snapshots. Kept locally, deliberately not tracked:
+# it's operational data about the project, not part of it. The workflow that
+# used to commit this daily was removed with it (see git history to restore).
+download-stats.csv
