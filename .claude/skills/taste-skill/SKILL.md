@@ -10,10 +10,18 @@ description: >-
   Next.js, Vue, Svelte, Astro, Tailwind) — also when the user says a page looks generic, templated,
   "AI-made", sloppy, or asks to make it look designed, premium, award-level or less like every other
   site. Also for app screens: dashboards, admin and analytics views, settings, inboxes and other screens
-  people work in, with their own run and rules.
+  people work in, with their own run and rules. Standalone: if the user names a different design skill
+  (e.g. bespoke-frontend) for the task, use that skill alone and do not load this one; one design skill
+  per task, never a mix of rule sets.
 ---
 
 # tasteskill v2
+
+> **Standalone rule.** This skill's rules are a complete, self-contained system. They are never
+> combined with, overridden by, or used to supplement another design skill's rules (such as
+> `bespoke-frontend`). Exactly one design skill governs a task: the one the user names, otherwise
+> whichever one this task triggered. If this skill is active, follow only this file and its
+> references; if another design skill is active, leave this one entirely out.
 
 A page built by a model usually looks like the average of every page the model has seen: a centred
 headline over three lines, a little label above it, a row of icon cards, a soft gradient, a few thin
